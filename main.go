@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"time"
 )
 
 type NewClientFun func(context.Context) (*pubsub.Client, error)
@@ -19,13 +20,23 @@ func MakeNewClientFun(opt opt) NewClientFun {
 	}
 }
 
-func pullTillStop(newClient NewClientFun, subname string, ctx context.Context, msgCh chan<- *pubsub.Message, doneCh chan bool) {
-	psClient, err := newClient(ctx)
+type taskPuller struct {
+	newClient      NewClientFun
+	subname        string
+	commandtimeout time.Duration
+	ctx            context.Context
+	msgCh          chan<- *pubsub.Message
+	tokenCh        <-chan bool
+	doneCh         chan bool
+}
+
+func (puller *taskPuller) pullTillStop() {
+	psClient, err := puller.newClient(puller.ctx)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	subs := psClient.Subscription(subname)
-	it, err := subs.Pull(ctx)
+	subs := psClient.Subscription(puller.subname)
+	it, err := subs.Pull(puller.ctx, pubsub.MaxExtension(puller.commandtimeout+time.Second*5))
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -33,27 +44,55 @@ func pullTillStop(newClient NewClientFun, subname string, ctx context.Context, m
 	func() {
 		defer it.Stop()
 		for {
+			<-puller.tokenCh
 			msg, err := it.Next()
 			if err != nil {
 				log.Printf("stop iteration by %T: %v\n", err, err)
 				break
 			}
-			msgCh <- msg
+			puller.msgCh <- msg
 		}
 	}()
 }
 
-func runTask(command string, args []string, ctx context.Context, msgCh <-chan *pubsub.Message) {
+type taskHandler struct {
+	command        string
+	args           []string
+	commandtimeout time.Duration
+	ctx            context.Context
+	msgCh          <-chan *pubsub.Message
+	tokenCh        chan<- bool
+}
+
+func (handler *taskHandler) handleTasks() {
 	for {
+		handler.tokenCh <- true
 		select {
-		case msg := <-msgCh:
-			cmd := exec.Command(command, args...)
+		case msg := <-handler.msgCh:
+			cmd := exec.Command(handler.command, handler.args...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.Stdin = bytes.NewReader(msg.Data)
 			cmd.Start()
-			cmd.Wait()
-			msg.Done(true)
+			cmdDone := make(chan error, 1)
+			go func() {
+				cmdDone <- cmd.Wait()
+			}()
+			select {
+			case <-time.After(handler.commandtimeout):
+				if err := cmd.Process.Kill(); err != nil {
+					log.Fatal("failed to kill: ", err)
+				}
+				log.Printf("process killed as timeout reached")
+			case err := <-cmdDone:
+				if err != nil {
+					msg.Done(false)
+					log.Printf("command failed: %v", err)
+				} else {
+					msg.Done(true)
+					log.Print("command done")
+				}
+			}
 		}
 	}
 }
@@ -64,10 +103,28 @@ func main() {
 	opt := parseOpt()
 	msgCh := make(chan *pubsub.Message)
 	doneCh := make(chan bool)
-	newClient := MakeNewClientFun(opt)
+	tokenCh := make(chan bool, opt.parallelism)
 	for i := 0; i < opt.parallelism; i += 1 {
-		go runTask(opt.command, opt.args, context.Background(), msgCh)
+		handler := &taskHandler{
+			command:        opt.command,
+			args:           opt.args,
+			commandtimeout: opt.commandtimeout,
+			ctx:            context.Background(),
+			msgCh:          msgCh,
+			tokenCh:        tokenCh,
+		}
+		go handler.handleTasks()
 	}
-	go pullTillStop(newClient, opt.subscription, context.Background(), msgCh, doneCh)
+
+	puller := &taskPuller{
+		newClient:      MakeNewClientFun(opt),
+		subname:        opt.subscription,
+		commandtimeout: opt.commandtimeout,
+		ctx:            context.Background(),
+		msgCh:          msgCh,
+		tokenCh:        tokenCh,
+		doneCh:         doneCh,
+	}
+	go puller.pullTillStop()
 	<-doneCh
 }

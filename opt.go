@@ -4,23 +4,34 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 type opt struct {
-	command      string
-	args         []string
-	project      string
-	subscription string
-	credentials  string
-	parallelism  int
+	command        string
+	args           []string
+	project        string
+	subscription   string
+	credentials    string
+	parallelism    int
+	retrytimeout   time.Duration
+	commandtimeout time.Duration
 }
 
 func parseOpt() opt {
 	opt := opt{}
-	flag.StringVar(&opt.project, "project", "", "project ID of the topic/subscription (currently required)")
-	flag.StringVar(&opt.subscription, "subscription", "", "subscription ID (required)")
-	flag.StringVar(&opt.credentials, "credentials", "", "path to service account credentials (currently required)")
-	flag.IntVar(&opt.parallelism, "parallelism", 1, "maximum number of tasks executed in parallel")
+	flag.StringVar(&opt.project, "project", "",
+		"project ID of the topic/subscription (currently required)")
+	flag.StringVar(&opt.subscription,
+		"subscription", "", "subscription ID (required)")
+	flag.StringVar(&opt.credentials, "credentials", "",
+		"path to service account credentials (currently required)")
+	flag.IntVar(&opt.parallelism, "parallelism", 1,
+		"maximum number of tasks executed in parallel")
+	flag.DurationVar(&opt.retrytimeout, "retrytimeout", time.Minute*120,
+		"maximum duration from publishing until last retry")
+	flag.DurationVar(&opt.commandtimeout, "commandtimeout", time.Second*60,
+		"maximum duration of a single command execution")
 	flag.Parse()
 
 	if opt.project == "" {
