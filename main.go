@@ -58,6 +58,7 @@ type taskHandler struct {
 	command        string
 	args           []string
 	commandtimeout time.Duration
+	retrytimeout   time.Duration
 	ctx            context.Context
 	msgCh          <-chan *pubsub.Message
 	tokenCh        chan<- bool
@@ -86,7 +87,7 @@ func (handler *taskHandler) rotateLogIfNecessary() {
 
 	if stat.Size() >= int64(handler.maxtasklogkb*1000) {
 		prevLogName := handler.tasklogname + ".prev"
-		log.Printf("mv task log %s to %s: %v", handler.tasklogname, prevLogName)
+		log.Printf("mv task log %s to %s", handler.tasklogname, prevLogName)
 		if err := os.Rename(handler.tasklogname, prevLogName); err != nil {
 			log.Printf("could not mv task log %s to %s: %v", handler.tasklogname, prevLogName, err)
 		}
@@ -94,18 +95,35 @@ func (handler *taskHandler) rotateLogIfNecessary() {
 }
 
 func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
+	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
+	now := time.Now()
+	if now.After(retryDeadline) {
+		log.Printf("ack message %s because of exceeded retry deadline %v",
+			msg.ID, retryDeadline)
+		msg.Done(true)
+		return
+	}
+
 	handler.rotateLogIfNecessary()
 	tlfile, err := os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
 	if err != nil {
-		log.Fatalf("could not open task log %s: %v", handler.tasklogname, err)
+		log.Printf("could not open task log %s: %v", handler.tasklogname, err)
+		msg.Done(false)
+		return
 	}
 	defer tlfile.Close()
 
+	log.Printf("process message %s", msg.ID)
 	cmd := exec.Command(handler.command, handler.args...)
 	cmd.Stdout = tlfile
 	cmd.Stderr = tlfile
 	cmd.Stdin = bytes.NewReader(msg.Data)
-	cmd.Start()
+	if err := cmd.Start(); err != nil {
+		log.Printf("could not spawn command for message %s: %v", msg.ID, err)
+		msg.Done(false)
+		return
+	}
+
 	cmdDone := make(chan error, 1)
 	go func() {
 		cmdDone <- cmd.Wait()
@@ -113,16 +131,16 @@ func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
 	select {
 	case <-time.After(handler.commandtimeout):
 		if err := cmd.Process.Kill(); err != nil {
-			log.Fatal("failed to kill: ", err)
+			log.Fatal("failed to kill command for command %s: ", msg.ID, err)
 		}
-		log.Printf("process killed as timeout reached")
+		log.Printf("process killed as command timeout reached for message %s", msg.ID)
 	case err := <-cmdDone:
 		if err != nil {
 			msg.Done(false)
-			log.Printf("command failed: %v", err)
+			log.Printf("command failed for message %s: %v", msg.ID, err)
 		} else {
 			msg.Done(true)
-			log.Print("command done")
+			log.Printf("command done for message %s", msg.ID)
 		}
 	}
 }
@@ -139,6 +157,7 @@ func main() {
 			command:        opt.command,
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
+			retrytimeout:   opt.retrytimeout,
 			ctx:            context.Background(),
 			msgCh:          msgCh,
 			tokenCh:        tokenCh,
