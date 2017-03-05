@@ -14,6 +14,8 @@ type opt struct {
 	subscription   string
 	credentials    string
 	parallelism    int
+	tasklogdir     string
+	maxtasklogkb   int
 	retrytimeout   time.Duration
 	commandtimeout time.Duration
 }
@@ -28,6 +30,10 @@ func parseOpt() opt {
 		"path to service account credentials (currently required)")
 	flag.IntVar(&opt.parallelism, "parallelism", 1,
 		"maximum number of tasks executed in parallel")
+	flag.StringVar(&opt.tasklogdir, "tasklogdir", ".",
+		"path of task logs")
+	flag.IntVar(&opt.maxtasklogkb, "maxtasklogkb", 1000,
+		"size in KB per task log file, which triggres log rotation")
 	flag.DurationVar(&opt.retrytimeout, "retrytimeout", time.Minute*120,
 		"maximum duration from publishing until last retry")
 	flag.DurationVar(&opt.commandtimeout, "commandtimeout", time.Second*60,
