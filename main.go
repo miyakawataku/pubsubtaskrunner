@@ -14,17 +14,8 @@ import (
 	"time"
 )
 
-type NewClientFun func(context.Context) (*pubsub.Client, error)
-
-func MakeNewClientFun(opt opt) NewClientFun {
-	return func(ctx context.Context) (*pubsub.Client, error) {
-		clientOpts := option.WithServiceAccountFile(opt.credentials)
-		return pubsub.NewClient(ctx, opt.project, clientOpts)
-	}
-}
-
 type taskPuller struct {
-	newClient      NewClientFun
+	psClient       *pubsub.Client
 	subname        string
 	commandtimeout time.Duration
 	ctx            context.Context
@@ -32,24 +23,41 @@ type taskPuller struct {
 	tokenCh        <-chan bool
 }
 
+func (puller *taskPuller) initMessageIterator() *pubsub.MessageIterator {
+	subs := puller.psClient.Subscription(puller.subname)
+	for {
+		it, err := subs.Pull(puller.ctx, pubsub.MaxExtension(puller.commandtimeout+time.Second*5))
+		switch {
+		case puller.ctx.Err() != nil:
+			return nil
+		case err != nil:
+			log.Printf("could not initialize puller; keep retrying: %v", err)
+		default:
+			return it
+		}
+	}
+}
+
 func (puller *taskPuller) pullTillStop() {
-	psClient, err := puller.newClient(puller.ctx)
-	if err != nil {
-		log.Fatal(err)
+	it := puller.initMessageIterator()
+	if it == nil {
+		log.Printf("shutdown puller before initialized")
+		return
 	}
-	subs := psClient.Subscription(puller.subname)
-	it, err := subs.Pull(puller.ctx, pubsub.MaxExtension(puller.commandtimeout+time.Second*5))
-	if err != nil {
-		log.Fatal(err)
-	}
+
+	log.Print("puller has been initialized")
 
 	defer it.Stop()
 	for {
 		<-puller.tokenCh
 		msg, err := it.Next()
-		if err != nil {
-			log.Printf("shutdown puller: %v", err)
+		if puller.ctx.Err() != nil {
+			log.Printf("shutdown puller")
 			break
+		}
+		if err != nil {
+			log.Printf("could not pull message; keep retrying: %v", err)
+			continue
 		}
 		puller.msgCh <- msg
 	}
@@ -154,13 +162,36 @@ func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
 	}
 }
 
+func newPsClient(opt opt, ctx context.Context) (*pubsub.Client, error) {
+	clientOpts := option.WithServiceAccountFile(opt.credentials)
+	return pubsub.NewClient(ctx, opt.project, clientOpts)
+}
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	log.SetPrefix("pubsubtaskrunner: ")
+	log.SetPrefix(fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid()))
 	opt := parseOpt()
+
+	appCtx, cancelApp := context.WithCancel(context.Background())
 	msgCh := make(chan *pubsub.Message)
 	tokenCh := make(chan bool, opt.parallelism)
-	appCtx, cancelApp := context.WithCancel(context.Background())
+
+	// start puller
+	psClient, err := newPsClient(opt, appCtx)
+	if err != nil {
+		log.Fatalf("could not make Pub/Sub client: %v", err)
+	}
+	puller := &taskPuller{
+		psClient:       psClient,
+		subname:        opt.subscription,
+		commandtimeout: opt.commandtimeout,
+		ctx:            appCtx,
+		msgCh:          msgCh,
+		tokenCh:        tokenCh,
+	}
+	go puller.pullTillStop()
+
+	// start handlers
 	handlers := []*taskHandler{}
 	for i := 0; i < opt.parallelism; i += 1 {
 		handler := &taskHandler{
@@ -180,15 +211,7 @@ func main() {
 		go handler.handleTasks()
 	}
 
-	puller := &taskPuller{
-		newClient:      MakeNewClientFun(opt),
-		subname:        opt.subscription,
-		commandtimeout: opt.commandtimeout,
-		ctx:            appCtx,
-		msgCh:          msgCh,
-		tokenCh:        tokenCh,
-	}
-	go puller.pullTillStop()
+	// await shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
