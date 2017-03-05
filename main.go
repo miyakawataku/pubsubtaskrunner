@@ -9,6 +9,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -28,7 +30,6 @@ type taskPuller struct {
 	ctx            context.Context
 	msgCh          chan<- *pubsub.Message
 	tokenCh        <-chan bool
-	doneCh         chan bool
 }
 
 func (puller *taskPuller) pullTillStop() {
@@ -47,7 +48,7 @@ func (puller *taskPuller) pullTillStop() {
 		<-puller.tokenCh
 		msg, err := it.Next()
 		if err != nil {
-			log.Printf("stop iteration by %T: %v\n", err, err)
+			log.Printf("shutdown puller: %v", err)
 			break
 		}
 		puller.msgCh <- msg
@@ -55,6 +56,7 @@ func (puller *taskPuller) pullTillStop() {
 }
 
 type taskHandler struct {
+	id             string
 	command        string
 	args           []string
 	commandtimeout time.Duration
@@ -62,6 +64,7 @@ type taskHandler struct {
 	ctx            context.Context
 	msgCh          <-chan *pubsub.Message
 	tokenCh        chan<- bool
+	doneCh         chan bool
 	tasklogname    string
 	maxtasklogkb   int
 }
@@ -69,8 +72,14 @@ type taskHandler struct {
 func (handler *taskHandler) handleTasks() {
 	for {
 		handler.tokenCh <- true
-		msg := <-handler.msgCh
-		handler.handleSingleTask(msg)
+		select {
+		case msg := <-handler.msgCh:
+			handler.handleSingleTask(msg)
+		case <-handler.ctx.Done():
+			log.Printf("shutdown %s", handler.id)
+			handler.doneCh <- true
+			return
+		}
 	}
 }
 
@@ -150,20 +159,24 @@ func main() {
 	log.SetPrefix("pubsubtaskrunner: ")
 	opt := parseOpt()
 	msgCh := make(chan *pubsub.Message)
-	doneCh := make(chan bool)
 	tokenCh := make(chan bool, opt.parallelism)
+	appCtx, cancelApp := context.WithCancel(context.Background())
+	handlers := []*taskHandler{}
 	for i := 0; i < opt.parallelism; i += 1 {
 		handler := &taskHandler{
+			id:             fmt.Sprintf("handler#%d", i),
 			command:        opt.command,
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
 			retrytimeout:   opt.retrytimeout,
-			ctx:            context.Background(),
+			ctx:            appCtx,
 			msgCh:          msgCh,
 			tokenCh:        tokenCh,
+			doneCh:         make(chan bool, 1),
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
 		}
+		handlers = append(handlers, handler)
 		go handler.handleTasks()
 	}
 
@@ -171,11 +184,18 @@ func main() {
 		newClient:      MakeNewClientFun(opt),
 		subname:        opt.subscription,
 		commandtimeout: opt.commandtimeout,
-		ctx:            context.Background(),
+		ctx:            appCtx,
 		msgCh:          msgCh,
 		tokenCh:        tokenCh,
-		doneCh:         doneCh,
 	}
 	go puller.pullTillStop()
-	<-doneCh
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	signal.Stop(sigChan)
+	log.Printf("start graceful shutdown")
+	cancelApp()
+	for _, handler := range handlers {
+		<-handler.doneCh
+	}
 }
