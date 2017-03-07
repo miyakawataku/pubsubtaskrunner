@@ -180,6 +180,19 @@ func newPsClient(opt opt, ctx context.Context) (*pubsub.Client, error) {
 	return pubsub.NewClient(ctx, opt.project, clientOpts)
 }
 
+func awaitShutdown(cancelApp context.CancelFunc, doneChs []<-chan bool) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	signal.Stop(sigChan)
+	log.Print("start graceful shutdown")
+	cancelApp()
+	for _, doneCh := range doneChs {
+		<-doneCh
+	}
+	log.Print("shutdown succeeded")
+}
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix(fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid()))
@@ -205,8 +218,10 @@ func main() {
 	go puller.pullTillStop()
 
 	// start handlers
-	handlers := []*taskHandler{}
+	doneChs := []<-chan bool{}
 	for i := 0; i < opt.parallelism; i += 1 {
+		doneCh := make(chan bool, 1)
+		doneChs = append(doneChs, doneCh)
 		handler := &taskHandler{
 			id:             fmt.Sprintf("handler#%d", i),
 			command:        opt.command,
@@ -216,23 +231,12 @@ func main() {
 			ctx:            appCtx,
 			msgCh:          msgCh,
 			tokenCh:        tokenCh,
-			doneCh:         make(chan bool, 1),
+			doneCh:         doneCh,
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
 		}
-		handlers = append(handlers, handler)
 		go handler.handleTasks()
 	}
 
-	// await shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	signal.Stop(sigChan)
-	log.Print("start graceful shutdown")
-	cancelApp()
-	for _, handler := range handlers {
-		<-handler.doneCh
-	}
-	log.Print("shutdown succeeded")
+	awaitShutdown(cancelApp, doneChs)
 }
