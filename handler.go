@@ -19,7 +19,7 @@ type taskHandler struct {
 	retrytimeout   time.Duration
 	ctx            context.Context
 	msgCh          <-chan *pubsub.Message
-	tokenCh        chan<- bool
+	pullReq        chan<- bool
 	doneCh         chan bool
 	tasklogname    string
 	maxtasklogkb   int
@@ -28,7 +28,7 @@ type taskHandler struct {
 func (handler *taskHandler) handleTasks() {
 	log.Printf("%s: start", handler.id)
 	for {
-		handler.tokenCh <- true
+		handler.pullReq <- true
 		select {
 		case msg := <-handler.msgCh:
 			handler.handleSingleTask(msg)

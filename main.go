@@ -36,7 +36,7 @@ func main() {
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	msgCh := make(chan *pubsub.Message)
-	tokenCh := make(chan bool, opt.parallelism)
+	pullReq := make(chan bool, opt.parallelism)
 
 	// start puller
 	psClient, err := newPsClient(opt, appCtx)
@@ -49,9 +49,11 @@ func main() {
 		commandtimeout: opt.commandtimeout,
 		ctx:            appCtx,
 		msgCh:          msgCh,
-		tokenCh:        tokenCh,
+		pullReq:        pullReq,
+		initMsgIter:    initMsgIter,
+		fetchMsg:       fetchMsg,
 	}
-	go puller.pullTillStop()
+	go puller.pullTillShutdown()
 
 	// start handlers
 	doneChs := []<-chan bool{}
@@ -66,7 +68,7 @@ func main() {
 			retrytimeout:   opt.retrytimeout,
 			ctx:            appCtx,
 			msgCh:          msgCh,
-			tokenCh:        tokenCh,
+			pullReq:        pullReq,
 			doneCh:         doneCh,
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
