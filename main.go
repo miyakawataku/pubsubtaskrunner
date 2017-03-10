@@ -47,13 +47,12 @@ func main() {
 		psClient:       psClient,
 		subname:        opt.subscription,
 		commandtimeout: opt.commandtimeout,
-		ctx:            appCtx,
 		msgCh:          msgCh,
 		pullReq:        pullReq,
 		initMsgIter:    initMsgIter,
 		fetchMsg:       fetchMsg,
 	}
-	go puller.pullTillShutdown()
+	go puller.pullTillShutdown(appCtx)
 
 	// start handlers
 	doneChs := []<-chan bool{}
@@ -66,14 +65,13 @@ func main() {
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
 			retrytimeout:   opt.retrytimeout,
-			ctx:            appCtx,
 			msgCh:          msgCh,
 			pullReq:        pullReq,
 			doneCh:         doneCh,
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
 		}
-		go handler.handleTasks()
+		go handler.handleTasks(appCtx)
 	}
 
 	awaitShutdown(cancelApp, doneChs)

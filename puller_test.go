@@ -19,7 +19,7 @@ func (psClient *fakePsClient) Subscription(subname string) *pubsub.Subscription 
 }
 
 func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFunc {
-	return func(subs, []pubsub.PullOption, context.Context) msgIter {
+	return func(context.Context, subs, []pubsub.PullOption) msgIter {
 		index := *callCount
 		*callCount += 1
 		if *callCount > len(actions) {
@@ -32,7 +32,7 @@ func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFu
 }
 
 func makeFakeFetchMsg(callCount *int, actions []func() *pubsub.Message) fetchMsgFunc {
-	return func(it msgIter, ctx context.Context) *pubsub.Message {
+	return func(ctx context.Context, it msgIter) *pubsub.Message {
 		index := *callCount
 		*callCount += 1
 		if *callCount > len(actions) {
@@ -53,11 +53,11 @@ func TestPullTillShutdown(t *testing.T) {
 	msg1 := new(pubsub.Message)
 	msg2 := new(pubsub.Message)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	puller := &taskPuller{
 		psClient:       &fakePsClient{new(pubsub.Subscription)},
 		subname:        "subs",
 		commandtimeout: time.Second * 10,
-		ctx:            ctx,
 		msgCh:          msgCh,
 		pullReq:        pullReq,
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
@@ -74,7 +74,7 @@ func TestPullTillShutdown(t *testing.T) {
 	}
 	doneCh := make(chan bool)
 	go func() {
-		puller.pullTillShutdown()
+		puller.pullTillShutdown(ctx)
 		doneCh <- true
 	}()
 	pullReq <- true
@@ -124,8 +124,9 @@ func TestInitMsgIter(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	ctx, _ := context.WithCancel(context.Background())
-	resIt := initMsgIter(subs, opts, ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resIt := initMsgIter(ctx, subs, opts)
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -144,8 +145,9 @@ func TestInitMsgIterRetry(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	ctx, _ := context.WithCancel(context.Background())
-	resIt := initMsgIter(subs, opts, ctx)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resIt := initMsgIter(ctx, subs, opts)
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -157,6 +159,7 @@ func TestInitMsgIterRetry(t *testing.T) {
 func TestinitMsgIterShutdownOnCancel(t *testing.T) {
 	canceledErr := errors.New("canceled")
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	subs := &fakeSubs{
 		actions: []pullFunc{
 			func() (*pubsub.MessageIterator, error) {
@@ -166,7 +169,7 @@ func TestinitMsgIterShutdownOnCancel(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	resIt := initMsgIter(subs, opts, ctx)
+	resIt := initMsgIter(ctx, subs, opts)
 	if resIt != nil {
 		t.Errorf("initMsgIter it: got %v, want: nil", resIt)
 	}
@@ -178,6 +181,7 @@ func TestinitMsgIterShutdownOnCancel(t *testing.T) {
 func TestinitMsgIterReturnIterIfNoErrorEvenAfterCancel(t *testing.T) {
 	it := new(pubsub.MessageIterator)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	subs := &fakeSubs{
 		actions: []pullFunc{
 			func() (*pubsub.MessageIterator, error) {
@@ -187,7 +191,7 @@ func TestinitMsgIterReturnIterIfNoErrorEvenAfterCancel(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	resIt := initMsgIter(subs, opts, ctx)
+	resIt := initMsgIter(ctx, subs, opts)
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -221,14 +225,15 @@ func (it *fakeMessageIterator) Stop() {
 }
 
 func TestFetchMsg(t *testing.T) {
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	msg := new(pubsub.Message)
 	it := &fakeMessageIterator{
 		actions: []nextFunc{
 			func() (*pubsub.Message, error) { return msg, nil },
 		},
 	}
-	resMsg := fetchMsg(it, ctx)
+	resMsg := fetchMsg(ctx, it)
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}
@@ -238,7 +243,8 @@ func TestFetchMsg(t *testing.T) {
 }
 
 func TestFetchMsgRetry(t *testing.T) {
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	msg := new(pubsub.Message)
 	it := &fakeMessageIterator{
 		actions: []nextFunc{
@@ -247,7 +253,7 @@ func TestFetchMsgRetry(t *testing.T) {
 			func() (*pubsub.Message, error) { return msg, nil },
 		},
 	}
-	resMsg := fetchMsg(it, ctx)
+	resMsg := fetchMsg(ctx, it)
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}
@@ -258,6 +264,7 @@ func TestFetchMsgRetry(t *testing.T) {
 
 func TestFetchMsgShutdownOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	canceledErr := errors.New("canceled")
 	it := &fakeMessageIterator{
 		actions: []nextFunc{
@@ -267,7 +274,7 @@ func TestFetchMsgShutdownOnCancel(t *testing.T) {
 			},
 		},
 	}
-	resMsg := fetchMsg(it, ctx)
+	resMsg := fetchMsg(ctx, it)
 	if resMsg != nil {
 		t.Errorf("fetchMsg msg: got: %v, want: nil", resMsg)
 	}
@@ -278,6 +285,7 @@ func TestFetchMsgShutdownOnCancel(t *testing.T) {
 
 func TestFetchMsgReturnMsgIfNoErrorEvenAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	msg := new(pubsub.Message)
 	it := &fakeMessageIterator{
 		actions: []nextFunc{
@@ -287,7 +295,7 @@ func TestFetchMsgReturnMsgIfNoErrorEvenAfterCancel(t *testing.T) {
 			},
 		},
 	}
-	resMsg := fetchMsg(it, ctx)
+	resMsg := fetchMsg(ctx, it)
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}

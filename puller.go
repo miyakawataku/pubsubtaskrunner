@@ -11,15 +11,14 @@ type taskPuller struct {
 	psClient       pubsubClient
 	subname        string
 	commandtimeout time.Duration
-	ctx            context.Context
 	msgCh          chan<- *pubsub.Message
 	pullReq        <-chan bool
 	fetchMsg       fetchMsgFunc
 	initMsgIter    initMsgIterFunc
 }
 
-type fetchMsgFunc func(msgIter, context.Context) *pubsub.Message
-type initMsgIterFunc func(subs, []pubsub.PullOption, context.Context) msgIter
+type fetchMsgFunc func(context.Context, msgIter) *pubsub.Message
+type initMsgIterFunc func(context.Context, subs, []pubsub.PullOption) msgIter
 
 type pubsubClient interface {
 	Subscription(subname string) *pubsub.Subscription
@@ -34,10 +33,10 @@ type subs interface {
 	Pull(context.Context, ...pubsub.PullOption) (*pubsub.MessageIterator, error)
 }
 
-func (puller *taskPuller) pullTillShutdown() {
+func (puller *taskPuller) pullTillShutdown(ctx context.Context) {
 	subs := puller.psClient.Subscription(puller.subname)
 	opts := puller.makePullOps()
-	it := puller.initMsgIter(subs, opts, puller.ctx)
+	it := puller.initMsgIter(ctx, subs, opts)
 	if it == nil {
 		log.Printf("puller: shutdown before being initialized")
 		return
@@ -48,11 +47,11 @@ func (puller *taskPuller) pullTillShutdown() {
 
 	for {
 		select {
-		case <-puller.ctx.Done():
+		case <-ctx.Done():
 			log.Printf("puller: shutdown while waiting request")
 			return
 		case <-puller.pullReq:
-			if msg := puller.fetchMsg(it, puller.ctx); msg != nil {
+			if msg := puller.fetchMsg(ctx, it); msg != nil {
 				puller.msgCh <- msg
 			} else {
 				log.Printf("puller: shutdown while waiting message")
@@ -66,7 +65,7 @@ func (puller *taskPuller) makePullOps() []pubsub.PullOption {
 	return []pubsub.PullOption{pubsub.MaxExtension(puller.commandtimeout + time.Second*5)}
 }
 
-func initMsgIter(subs subs, opts []pubsub.PullOption, ctx context.Context) msgIter {
+func initMsgIter(ctx context.Context, subs subs, opts []pubsub.PullOption) msgIter {
 	for {
 		it, err := subs.Pull(ctx, opts...)
 		if it != nil {
@@ -79,7 +78,7 @@ func initMsgIter(subs subs, opts []pubsub.PullOption, ctx context.Context) msgIt
 	}
 }
 
-func fetchMsg(it msgIter, ctx context.Context) *pubsub.Message {
+func fetchMsg(ctx context.Context, it msgIter) *pubsub.Message {
 	for {
 		msg, err := it.Next()
 		if msg != nil {

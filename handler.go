@@ -17,7 +17,6 @@ type taskHandler struct {
 	args           []string
 	commandtimeout time.Duration
 	retrytimeout   time.Duration
-	ctx            context.Context
 	msgCh          <-chan *pubsub.Message
 	pullReq        chan<- bool
 	doneCh         chan bool
@@ -25,14 +24,14 @@ type taskHandler struct {
 	maxtasklogkb   int
 }
 
-func (handler *taskHandler) handleTasks() {
+func (handler *taskHandler) handleTasks(ctx context.Context) {
 	log.Printf("%s: start", handler.id)
 	for {
 		handler.pullReq <- true
 		select {
 		case msg := <-handler.msgCh:
 			handler.handleSingleTask(msg)
-		case <-handler.ctx.Done():
+		case <-ctx.Done():
 			log.Printf("%s: shutdown", handler.id)
 			handler.doneCh <- true
 			return
