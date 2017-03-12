@@ -5,18 +5,9 @@ import (
 	"errors"
 	"golang.org/x/net/context"
 	"testing"
-	"time"
 )
 
 // test puller.pullTillShutdown
-
-type fakePsClient struct {
-	subs *pubsub.Subscription
-}
-
-func (psClient *fakePsClient) Subscription(subname string) *pubsub.Subscription {
-	return psClient.subs
-}
 
 func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFunc {
 	return func(context.Context, subs, []pubsub.PullOption) msgIter {
@@ -44,9 +35,34 @@ func makeFakeFetchMsg(callCount *int, actions []func() *pubsub.Message) fetchMsg
 	}
 }
 
-func TestPullTillShutdown(t *testing.T) {
-	msgCh := make(chan *pubsub.Message, 3)
-	pullReq := make(chan bool, 3)
+func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
+	reqCh := make(chan bool)
+	initCallCount := 0
+	it := &fakeMessageIterator{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	puller := &taskPuller{
+		subs:  new(pubsub.Subscription),
+		reqCh: reqCh,
+		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
+			func() msgIter { return it },
+		}),
+	}
+	doneCh := make(chan bool)
+	go func() {
+		puller.pullTillShutdown(ctx)
+		doneCh <- true
+	}()
+	cancel()
+	<-doneCh
+	if initCallCount != 1 {
+		t.Errorf("unexpected initMsgIter call count: got %v, want 1", initCallCount)
+	}
+}
+
+func TestPullTillShutdownBreakWhileWaitingMessage(t *testing.T) {
+	respCh := make(chan *pubsub.Message, 3)
+	reqCh := make(chan bool, 3)
 	initCallCount := 0
 	fetchCallCount := 0
 	it := &fakeMessageIterator{}
@@ -55,21 +71,16 @@ func TestPullTillShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	puller := &taskPuller{
-		psClient:       &fakePsClient{new(pubsub.Subscription)},
-		subname:        "subs",
-		commandtimeout: time.Second * 10,
-		msgCh:          msgCh,
-		pullReq:        pullReq,
+		subs:   new(pubsub.Subscription),
+		respCh: respCh,
+		reqCh:  reqCh,
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { return it },
 		}),
 		fetchMsg: makeFakeFetchMsg(&fetchCallCount, []func() *pubsub.Message{
 			func() *pubsub.Message { return msg1 },
 			func() *pubsub.Message { return msg2 },
-			func() *pubsub.Message {
-				cancel()
-				return nil
-			},
+			func() *pubsub.Message { cancel(); return nil },
 		}),
 	}
 	doneCh := make(chan bool)
@@ -77,11 +88,11 @@ func TestPullTillShutdown(t *testing.T) {
 		puller.pullTillShutdown(ctx)
 		doneCh <- true
 	}()
-	pullReq <- true
-	pullReq <- true
-	pullReq <- true
-	resMsg1 := <-msgCh
-	resMsg2 := <-msgCh
+	reqCh <- true
+	reqCh <- true
+	reqCh <- true
+	resMsg1 := <-respCh
+	resMsg2 := <-respCh
 	<-doneCh
 	if initCallCount != 1 {
 		t.Errorf("unexpected initMsgIter call count: got %v, want 1", initCallCount)
@@ -94,6 +105,30 @@ func TestPullTillShutdown(t *testing.T) {
 	}
 	if resMsg2 != msg2 {
 		t.Errorf("unmatching msg2: %v", resMsg2)
+	}
+	if !it.stopCalled {
+		t.Errorf("it Stop() not called")
+	}
+}
+
+func TestPullTillShutdownBreakBeforeInitialized(t *testing.T) {
+	initCallCount := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	puller := &taskPuller{
+		subs: new(pubsub.Subscription),
+		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
+			func() msgIter { cancel(); return nil },
+		}),
+	}
+	defer cancel()
+	doneCh := make(chan bool)
+	go func() {
+		puller.pullTillShutdown(ctx)
+		doneCh <- true
+	}()
+	<-doneCh
+	if initCallCount != 1 {
+		t.Errorf("unexpected initMsgIter call count: got %v, want 1", initCallCount)
 	}
 }
 

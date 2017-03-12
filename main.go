@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 func newPsClient(opt opt, ctx context.Context) (*pubsub.Client, error) {
@@ -35,8 +36,8 @@ func main() {
 	opt := parseOpt()
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
-	msgCh := make(chan *pubsub.Message)
-	pullReq := make(chan bool, opt.parallelism)
+	respCh := make(chan *pubsub.Message)
+	reqCh := make(chan bool, opt.parallelism)
 
 	// start puller
 	psClient, err := newPsClient(opt, appCtx)
@@ -44,13 +45,12 @@ func main() {
 		log.Fatalf("could not make Pub/Sub client: %v", err)
 	}
 	puller := &taskPuller{
-		psClient:       psClient,
-		subname:        opt.subscription,
-		commandtimeout: opt.commandtimeout,
-		msgCh:          msgCh,
-		pullReq:        pullReq,
-		initMsgIter:    initMsgIter,
-		fetchMsg:       fetchMsg,
+		subs:         psClient.Subscription(opt.subscription),
+		maxExtension: opt.commandtimeout * time.Second * 5,
+		respCh:       respCh,
+		reqCh:        reqCh,
+		initMsgIter:  initMsgIter,
+		fetchMsg:     fetchMsg,
 	}
 	go puller.pullTillShutdown(appCtx)
 
@@ -65,8 +65,8 @@ func main() {
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
 			retrytimeout:   opt.retrytimeout,
-			msgCh:          msgCh,
-			pullReq:        pullReq,
+			respCh:         respCh,
+			reqCh:          reqCh,
 			doneCh:         doneCh,
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
