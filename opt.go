@@ -18,6 +18,7 @@ type opt struct {
 	maxtasklogkb   int
 	retrytimeout   time.Duration
 	commandtimeout time.Duration
+	termtimeout    time.Duration
 }
 
 func parseOpt() opt {
@@ -37,7 +38,9 @@ func parseOpt() opt {
 	flag.DurationVar(&opt.retrytimeout, "retrytimeout", time.Minute*120,
 		"maximum duration from publishing until last retry")
 	flag.DurationVar(&opt.commandtimeout, "commandtimeout", time.Second*60,
-		"maximum duration of a single command execution")
+		"timeout duration of a single command execution")
+	flag.DurationVar(&opt.termtimeout, "termtimeout", time.Second*5,
+		"timeout duration of the first command termination attempt by SIGTERM")
 	flag.Parse()
 
 	if opt.project == "" {

@@ -15,6 +15,7 @@ func TestRunCmd(t *testing.T) {
 		command:        "/bin/cat",
 		args:           []string{"-"},
 		commandtimeout: time.Second * 10,
+		termtimeout:    time.Second,
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -36,6 +37,7 @@ func TestRunCmdTimeout(t *testing.T) {
 		command:        "/bin/sleep",
 		args:           []string{"5"},
 		commandtimeout: time.Second,
+		termtimeout:    time.Second,
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -54,6 +56,7 @@ func TestRunCmdTermTimeout(t *testing.T) {
 		command:        "/bin/sh",
 		args:           []string{"-c", "trap '/bin/true' 15; while /bin/true; do /bin/sleep 100; done"},
 		commandtimeout: time.Second,
+		termtimeout:    time.Second,
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -72,6 +75,7 @@ func TestRunCmdLaunchError(t *testing.T) {
 		command:        "/bin/no/such/command.never",
 		args:           []string{},
 		commandtimeout: time.Second,
+		termtimeout:    time.Second,
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",

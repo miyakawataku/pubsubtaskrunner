@@ -64,6 +64,7 @@ func main() {
 			command:        opt.command,
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
+			termtimeout:    opt.termtimeout,
 			retrytimeout:   opt.retrytimeout,
 			respCh:         respCh,
 			reqCh:          reqCh,

@@ -18,6 +18,7 @@ type taskHandler struct {
 	command        string
 	args           []string
 	commandtimeout time.Duration
+	termtimeout    time.Duration
 	retrytimeout   time.Duration
 	respCh         <-chan *pubsub.Message
 	reqCh          chan<- bool
@@ -157,13 +158,12 @@ func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error 
 		log.Printf("%s: message=%s: command-pgid=%d: command didn't complete in %v; will SIGTERM process group",
 			handler.id, msg.ID, pgid, handler.commandtimeout)
 		syscall.Kill(-pgid, syscall.SIGTERM)
-		termTimeout := time.Second * 5
 		select {
 		case <-cmdDone:
 			return cmdTimeoutError(pgid)
-		case <-time.After(termTimeout):
+		case <-time.After(handler.termtimeout):
 			log.Printf("%s: message=%s: command-pgid=%d: command didn't terminate in %v; will SIGKILL process group",
-				handler.id, msg.ID, pgid, termTimeout)
+				handler.id, msg.ID, pgid, handler.termtimeout)
 			syscall.Kill(-pgid, syscall.SIGKILL)
 			return cmdTermTimeoutError(pgid)
 		}
