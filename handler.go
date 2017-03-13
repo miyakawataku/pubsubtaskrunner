@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"cloud.google.com/go/pubsub"
-	"errors"
 	"fmt"
 	"golang.org/x/net/context"
 	"io"
@@ -116,15 +115,23 @@ func openTaskLog(handler *taskHandler) (io.WriteCloser, error) {
 	return os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
 }
 
-type CmdTimeoutError int
+type spawnError struct {
+	cause error
+}
 
-func (pgid CmdTimeoutError) Error() string {
+func (err spawnError) Error() string {
+	return fmt.Sprintf("could not spawn command: %v", err.cause)
+}
+
+type cmdTimeoutError int
+
+func (pgid cmdTimeoutError) Error() string {
 	return fmt.Sprintf("command timeout: command-pgid=%d", pgid)
 }
 
-type CmdTermTimeoutError int
+type cmdTermTimeoutError int
 
-func (pgid CmdTermTimeoutError) Error() string {
+func (pgid cmdTermTimeoutError) Error() string {
 	return fmt.Sprintf("command termination timeout: command-pgid=%d", pgid)
 }
 
@@ -135,7 +142,7 @@ func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error 
 	cmd.Stdin = bytes.NewReader(msg.Data)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
-		return errors.New(fmt.Sprintf("could not spawn command: %v", err))
+		return spawnError{err}
 	}
 	pgid := cmd.Process.Pid
 	log.Printf("%s: message=%s: command-pgid=%d: spawned the command",
@@ -153,12 +160,12 @@ func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error 
 		termTimeout := time.Second * 5
 		select {
 		case <-cmdDone:
-			return CmdTimeoutError(pgid)
+			return cmdTimeoutError(pgid)
 		case <-time.After(termTimeout):
 			log.Printf("%s: message=%s: command-pgid=%d: command didn't terminate in %v; will SIGKILL process group",
 				handler.id, msg.ID, pgid, termTimeout)
 			syscall.Kill(-pgid, syscall.SIGKILL)
-			return CmdTermTimeoutError(pgid)
+			return cmdTermTimeoutError(pgid)
 		}
 	}
 }
