@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"cloud.google.com/go/pubsub"
+	"errors"
+	"fmt"
 	"golang.org/x/net/context"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -22,6 +25,23 @@ type taskHandler struct {
 	doneCh         chan bool
 	tasklogname    string
 	maxtasklogkb   int
+	ack            ackNackFunc
+	nack           ackNackFunc
+	now            nowFunc
+	openTaskLog    openTaskLogFunc
+	rotateTaskLog  rotateTaskLogFunc
+}
+
+type ackNackFunc func(msg *pubsub.Message)
+type nowFunc func() time.Time
+
+func makeHandlerWithDefault(handler taskHandler) *taskHandler {
+	handler.ack = func(msg *pubsub.Message) { msg.Done(true) }
+	handler.nack = func(msg *pubsub.Message) { msg.Done(false) }
+	handler.now = time.Now
+	handler.openTaskLog = openTaskLog
+	handler.rotateTaskLog = rotateTaskLog
+	return &handler
 }
 
 func (handler *taskHandler) handleTasks(ctx context.Context) {
@@ -39,7 +59,37 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 	}
 }
 
-func (handler *taskHandler) rotateLogIfNecessary() {
+func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
+	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
+	if handler.now().After(retryDeadline) {
+		log.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
+			handler.id, msg.ID, retryDeadline)
+		handler.ack(msg)
+		return
+	}
+
+	handler.rotateTaskLog(handler)
+	taskLog, err := handler.openTaskLog(handler)
+	if err != nil {
+		log.Printf("%s: message=%s: could not open task log %s: %v",
+			handler.id, msg.ID, handler.tasklogname, err)
+		handler.nack(msg)
+		return
+	}
+	defer taskLog.Close()
+
+	if err := runCmd(handler, msg, taskLog); err != nil {
+		log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
+		handler.nack(msg)
+	} else {
+		log.Printf("%s: message=%s: command done", handler.id, msg.ID)
+		handler.ack(msg)
+	}
+}
+
+type rotateTaskLogFunc func(handler *taskHandler)
+
+func rotateTaskLog(handler *taskHandler) {
 	stat, err := os.Stat(handler.tasklogname)
 	switch {
 	case os.IsNotExist(err):
@@ -60,60 +110,55 @@ func (handler *taskHandler) rotateLogIfNecessary() {
 	}
 }
 
-func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
-	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
-	now := time.Now()
-	if now.After(retryDeadline) {
-		log.Printf("%s: message=%s: ack because of exceeded retry deadline %v",
-			handler.id, msg.ID, retryDeadline)
-		msg.Done(true)
-		return
-	}
+type openTaskLogFunc func(handler *taskHandler) (io.WriteCloser, error)
 
-	handler.rotateLogIfNecessary()
-	tlfile, err := os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
-	if err != nil {
-		log.Printf("%s: message=%s: could not open task log %s: %v",
-			handler.id, msg.ID, handler.tasklogname, err)
-		msg.Done(false)
-		return
-	}
-	defer tlfile.Close()
+func openTaskLog(handler *taskHandler) (io.WriteCloser, error) {
+	return os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
+}
 
-	log.Printf("%s: message=%s: process message", handler.id, msg.ID)
+type CmdTimeoutError int
+
+func (pgid CmdTimeoutError) Error() string {
+	return fmt.Sprintf("command timeout: command-pgid=%d", pgid)
+}
+
+type CmdTermTimeoutError int
+
+func (pgid CmdTermTimeoutError) Error() string {
+	return fmt.Sprintf("command termination timeout: command-pgid=%d", pgid)
+}
+
+func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error {
 	cmd := exec.Command(handler.command, handler.args...)
-	cmd.Stdout = tlfile
-	cmd.Stderr = tlfile
+	cmd.Stdout = taskLog
+	cmd.Stderr = taskLog
 	cmd.Stdin = bytes.NewReader(msg.Data)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
-		log.Printf("%s: message=%s: could not spawn command: %v", handler.id, msg.ID, err)
-		msg.Done(false)
-		return
+		return errors.New(fmt.Sprintf("could not spawn command: %v", err))
 	}
+	pgid := cmd.Process.Pid
+	log.Printf("%s: message=%s: command-pgid=%d: spawned the command",
+		handler.id, msg.ID, pgid)
 
 	cmdDone := make(chan error, 1)
-	go func() {
-		cmdDone <- cmd.Wait()
-	}()
+	go func() { cmdDone <- cmd.Wait() }()
 	select {
 	case err := <-cmdDone:
-		if err != nil {
-			msg.Done(false)
-			log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
-		} else {
-			msg.Done(true)
-			log.Printf("%s: message=%s: command done", handler.id, msg.ID)
-		}
+		return err
 	case <-time.After(handler.commandtimeout):
-		log.Printf("%s: message=%s: kill process as command timeout reached", handler.id, msg.ID)
-		syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		log.Printf("%s: message=%s: command-pgid=%d: command didn't complete in %v; will SIGTERM process group",
+			handler.id, msg.ID, pgid, handler.commandtimeout)
+		syscall.Kill(-pgid, syscall.SIGTERM)
+		termTimeout := time.Second * 5
 		select {
 		case <-cmdDone:
-			log.Printf("%s: message=%s: killed process", handler.id, msg.ID)
-		case <-time.After(time.Second * 5):
-			log.Printf("%s: message=%s: kill lingering process by SIGKILL", handler.id, msg.ID)
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return CmdTimeoutError(pgid)
+		case <-time.After(termTimeout):
+			log.Printf("%s: message=%s: command-pgid=%d: command didn't terminate in %v; will SIGKILL process group",
+				handler.id, msg.ID, pgid, termTimeout)
+			syscall.Kill(-pgid, syscall.SIGKILL)
+			return CmdTermTimeoutError(pgid)
 		}
 	}
 }

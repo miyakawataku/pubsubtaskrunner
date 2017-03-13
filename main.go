@@ -59,7 +59,7 @@ func main() {
 	for i := 0; i < opt.parallelism; i += 1 {
 		doneCh := make(chan bool, 1)
 		doneChs = append(doneChs, doneCh)
-		handler := &taskHandler{
+		handler := makeHandlerWithDefault(taskHandler{
 			id:             fmt.Sprintf("handler#%d", i),
 			command:        opt.command,
 			args:           opt.args,
@@ -70,7 +70,7 @@ func main() {
 			doneCh:         doneCh,
 			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
-		}
+		})
 		go handler.handleTasks(appCtx)
 	}
 
