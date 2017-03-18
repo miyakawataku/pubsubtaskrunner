@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"cloud.google.com/go/pubsub"
+	"errors"
 	"fmt"
 	"golang.org/x/net/context"
 	"io"
@@ -25,8 +26,6 @@ type taskHandler struct {
 	doneCh         chan bool
 	tasklogname    string
 	maxtasklogkb   int
-	ack            ackNackFunc
-	nack           ackNackFunc
 	now            nowFunc
 	openTaskLog    openTaskLogFunc
 	rotateTaskLog  rotateTaskLogFunc
@@ -36,8 +35,6 @@ type ackNackFunc func(msg *pubsub.Message)
 type nowFunc func() time.Time
 
 func makeHandlerWithDefault(handler taskHandler) *taskHandler {
-	handler.ack = func(msg *pubsub.Message) { msg.Done(true) }
-	handler.nack = func(msg *pubsub.Message) { msg.Done(false) }
 	handler.now = time.Now
 	handler.openTaskLog = openTaskLog
 	handler.rotateTaskLog = rotateTaskLog
@@ -50,7 +47,8 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 		handler.reqCh <- true
 		select {
 		case msg := <-handler.respCh:
-			handler.handleSingleTask(msg)
+			status := handler.handleSingleTask(msg)
+			msg.Done(status)
 		case <-ctx.Done():
 			log.Printf("%s: shutdown", handler.id)
 			handler.doneCh <- true
@@ -59,61 +57,72 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 	}
 }
 
-func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) {
+const (
+	ack  = true
+	nack = false
+)
+
+func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) bool {
 	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
 	if handler.now().After(retryDeadline) {
 		log.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
 			handler.id, msg.ID, retryDeadline)
-		handler.ack(msg)
-		return
+		return ack
 	}
 
-	handler.rotateTaskLog(handler)
+	if _, err := handler.rotateTaskLog(handler); err != nil {
+		log.Printf("%s: message=%s: could not rotate task log %s: %v",
+			handler.id, msg.ID, handler.tasklogname, err)
+		return nack
+	}
+
 	taskLog, err := handler.openTaskLog(handler)
 	if err != nil {
 		log.Printf("%s: message=%s: could not open task log %s: %v",
 			handler.id, msg.ID, handler.tasklogname, err)
-		handler.nack(msg)
-		return
+		return nack
 	}
 	defer taskLog.Close()
 
 	if err := runCmd(handler, msg, taskLog); err != nil {
 		log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
-		handler.nack(msg)
+		return nack
 	} else {
 		log.Printf("%s: message=%s: command done", handler.id, msg.ID)
-		handler.ack(msg)
+		return ack
 	}
 }
 
-type rotateTaskLogFunc func(handler *taskHandler)
+type rotateTaskLogFunc func(handler *taskHandler) (bool, error)
 
-func rotateTaskLog(handler *taskHandler) {
+func rotateTaskLog(handler *taskHandler) (bool, error) {
 	stat, err := os.Stat(handler.tasklogname)
 	switch {
 	case os.IsNotExist(err):
 		log.Printf("%s: create new task log %s", handler.id, handler.tasklogname)
-		return
+		return false, nil
 	case err != nil:
-		log.Printf("%s: cannot stat %s: %v", handler.id, handler.tasklogname, err)
-		return
+		return false, errors.New(fmt.Sprintf("cannot stat %s: %v", handler.tasklogname, err))
 	}
 
-	if stat.Size() >= int64(handler.maxtasklogkb*1000) {
+	if stat.Size() > int64(handler.maxtasklogkb*1000) {
 		prevLogName := handler.tasklogname + ".prev"
 		log.Printf("%s: mv task log %s to %s", handler.id, handler.tasklogname, prevLogName)
 		if err := os.Rename(handler.tasklogname, prevLogName); err != nil {
-			log.Printf("%s: could not mv task log %s to %s: %v",
-				handler.id, handler.tasklogname, prevLogName, err)
+			return false, errors.New(fmt.Sprintf(
+				"could not mv task log %s to %s: %v",
+				handler.tasklogname, prevLogName, err))
 		}
+		return true, nil
+	} else {
+		return false, nil
 	}
 }
 
 type openTaskLogFunc func(handler *taskHandler) (io.WriteCloser, error)
 
 func openTaskLog(handler *taskHandler) (io.WriteCloser, error) {
-	return os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0755)
+	return os.OpenFile(handler.tasklogname, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 }
 
 type spawnError struct {
