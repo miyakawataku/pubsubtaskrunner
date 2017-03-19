@@ -3,11 +3,153 @@ package main
 import (
 	"bytes"
 	"cloud.google.com/go/pubsub"
+	"errors"
+	"io"
 	"io/ioutil"
 	"os"
 	"testing"
 	"time"
 )
+
+// test handleSingleTask
+
+func TestHandleSingleTaskAckForExceedRetryDeadline(t *testing.T) {
+	pubTime := time.Date(2017, 3, 1, 0, 0, 0, 0, time.UTC)
+	msg := &pubsub.Message{
+		PublishTime: pubTime,
+		ID:          "msg001",
+	}
+	handler := &taskHandler{
+		id:           "handler#001",
+		retrytimeout: time.Minute * 10,
+		now: func() time.Time {
+			return pubTime.Add(time.Minute*10 + time.Second)
+		},
+	}
+	notifier := handleSingleTask(handler, msg)
+	if notifier != ack {
+		t.Error("handleSingleTask must return ack because of exceeded deadline, but returned %v", notifier)
+	}
+}
+
+func TestHandleSingleTaskNackForLogRotationFailure(t *testing.T) {
+	pubTime := time.Date(2017, 3, 1, 0, 0, 0, 0, time.UTC)
+	msg := &pubsub.Message{
+		PublishTime: pubTime,
+		ID:          "msg001",
+	}
+	handler := &taskHandler{
+		id:           "handler#001",
+		retrytimeout: time.Minute * 10,
+		now: func() time.Time {
+			return pubTime.Add(time.Minute * 10)
+		},
+		rotateTaskLog: func(handler *taskHandler) (bool, error) {
+			return false, errors.New("bang")
+		},
+	}
+	notifier := handleSingleTask(handler, msg)
+	if notifier != nack {
+		t.Error("handleSingleTask must return nack because of log rotation failure, but returned %v", notifier)
+	}
+}
+
+func TestHandleSingleTaskNackForLogOpeningFailure(t *testing.T) {
+	pubTime := time.Date(2017, 3, 1, 0, 0, 0, 0, time.UTC)
+	msg := &pubsub.Message{
+		PublishTime: pubTime,
+		ID:          "msg001",
+	}
+	handler := &taskHandler{
+		id:           "handler#001",
+		retrytimeout: time.Minute * 10,
+		now: func() time.Time {
+			return pubTime.Add(time.Minute * 10)
+		},
+		rotateTaskLog: func(handler *taskHandler) (bool, error) {
+			return true, nil
+		},
+		openTaskLog: func(handler *taskHandler) (io.WriteCloser, error) {
+			return nil, errors.New("bang")
+		},
+	}
+	notifier := handleSingleTask(handler, msg)
+	if notifier != nack {
+		t.Error("handleSingleTask must return nack because of log opening failure, but returned %v", notifier)
+	}
+}
+
+type fakeWriteCloser struct {
+	isClosed bool
+}
+
+func (fwc *fakeWriteCloser) Write(p []byte) (int, error) {
+	return 0, nil
+}
+
+func (fwc *fakeWriteCloser) Close() error {
+	fwc.isClosed = true
+	return nil
+}
+
+func TestHandleSingleTaskAckForCommandSuccess(t *testing.T) {
+	pubTime := time.Date(2017, 3, 1, 0, 0, 0, 0, time.UTC)
+	msg := &pubsub.Message{
+		PublishTime: pubTime,
+		ID:          "msg001",
+	}
+	fwc := &fakeWriteCloser{}
+	handler := &taskHandler{
+		id:           "handler#001",
+		retrytimeout: time.Minute * 10,
+		now: func() time.Time {
+			return pubTime.Add(time.Minute * 10)
+		},
+		rotateTaskLog: func(handler *taskHandler) (bool, error) {
+			return true, nil
+		},
+		openTaskLog: func(handler *taskHandler) (io.WriteCloser, error) {
+			return fwc, nil
+		},
+		runCmd: func(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error {
+			return nil
+		},
+	}
+	notifier := handleSingleTask(handler, msg)
+	if notifier != ack {
+		t.Error("handleSingleTask must return ack because of log command success, but returned %v", notifier)
+	}
+}
+
+func TestHandleSingleTaskAckForCommandFailure(t *testing.T) {
+	pubTime := time.Date(2017, 3, 1, 0, 0, 0, 0, time.UTC)
+	msg := &pubsub.Message{
+		PublishTime: pubTime,
+		ID:          "msg001",
+	}
+	fwc := &fakeWriteCloser{}
+	handler := &taskHandler{
+		id:           "handler#001",
+		retrytimeout: time.Minute * 10,
+		now: func() time.Time {
+			return pubTime.Add(time.Minute * 10)
+		},
+		rotateTaskLog: func(handler *taskHandler) (bool, error) {
+			return true, nil
+		},
+		openTaskLog: func(handler *taskHandler) (io.WriteCloser, error) {
+			return fwc, nil
+		},
+		runCmd: func(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error {
+			return errors.New("bang")
+		},
+	}
+	notifier := handleSingleTask(handler, msg)
+	if notifier != nack {
+		t.Error("handleSingleTask must return nack because of log command failure, but returned %v", notifier)
+	}
+
+}
 
 // test rotateTaskLog
 

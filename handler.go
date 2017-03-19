@@ -15,20 +15,22 @@ import (
 )
 
 type taskHandler struct {
-	id             string
-	command        string
-	args           []string
-	commandtimeout time.Duration
-	termtimeout    time.Duration
-	retrytimeout   time.Duration
-	respCh         <-chan *pubsub.Message
-	reqCh          chan<- bool
-	doneCh         chan bool
-	tasklogname    string
-	maxtasklogkb   int
-	now            nowFunc
-	openTaskLog    openTaskLogFunc
-	rotateTaskLog  rotateTaskLogFunc
+	id               string
+	command          string
+	args             []string
+	commandtimeout   time.Duration
+	termtimeout      time.Duration
+	retrytimeout     time.Duration
+	respCh           <-chan *pubsub.Message
+	reqCh            chan<- bool
+	doneCh           chan bool
+	tasklogname      string
+	maxtasklogkb     int
+	now              nowFunc
+	handleSingleTask handleSingleTaskFunc
+	openTaskLog      openTaskLogFunc
+	rotateTaskLog    rotateTaskLogFunc
+	runCmd           runCmdFunc
 }
 
 type ackNackFunc func(msg *pubsub.Message)
@@ -36,8 +38,10 @@ type nowFunc func() time.Time
 
 func makeHandlerWithDefault(handler taskHandler) *taskHandler {
 	handler.now = time.Now
+	handler.handleSingleTask = handleSingleTask
 	handler.openTaskLog = openTaskLog
 	handler.rotateTaskLog = rotateTaskLog
+	handler.runCmd = runCmd
 	return &handler
 }
 
@@ -47,8 +51,8 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 		handler.reqCh <- true
 		select {
 		case msg := <-handler.respCh:
-			status := handler.handleSingleTask(msg)
-			msg.Done(status)
+			notifier := handler.handleSingleTask(handler, msg)
+			notifier.notify(handler, msg)
 		case <-ctx.Done():
 			log.Printf("%s: shutdown", handler.id)
 			handler.doneCh <- true
@@ -57,12 +61,35 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 	}
 }
 
-const (
-	ack  = true
-	nack = false
+type resultNotifier struct {
+	result bool
+	desc   string
+}
+
+func (rn *resultNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
+	log.Printf("%s: message=%s: %s the message", handler.id, msg.ID, rn.desc)
+	msg.Done(rn.result)
+}
+
+var (
+	ack  *resultNotifier
+	nack *resultNotifier
 )
 
-func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) bool {
+func init() {
+	ack = &resultNotifier{
+		result: true,
+		desc:   "ack",
+	}
+	nack = &resultNotifier{
+		result: false,
+		desc:   "nack",
+	}
+}
+
+type handleSingleTaskFunc func(handler *taskHandler, msg *pubsub.Message) *resultNotifier
+
+func handleSingleTask(handler *taskHandler, msg *pubsub.Message) *resultNotifier {
 	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
 	if handler.now().After(retryDeadline) {
 		log.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
@@ -84,7 +111,7 @@ func (handler *taskHandler) handleSingleTask(msg *pubsub.Message) bool {
 	}
 	defer taskLog.Close()
 
-	if err := runCmd(handler, msg, taskLog); err != nil {
+	if err := handler.runCmd(handler, msg, taskLog); err != nil {
 		log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
 		return nack
 	} else {
@@ -144,6 +171,8 @@ type cmdTermTimeoutError int
 func (pgid cmdTermTimeoutError) Error() string {
 	return fmt.Sprintf("command termination timeout: command-pgid=%d", pgid)
 }
+
+type runCmdFunc func(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error
 
 func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error {
 	cmd := exec.Command(handler.command, handler.args...)
