@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-type opt struct {
+// conf is a struct of the program configuration.
+type conf struct {
 	command        string
 	args           []string
 	project        string
@@ -21,41 +22,42 @@ type opt struct {
 	termtimeout    time.Duration
 }
 
-func parseOpt() opt {
-	opt := opt{}
-	flag.StringVar(&opt.project, "project", "",
+// readConf reads configuration from the commandline.
+func readConf() conf {
+	conf := conf{}
+	flag.StringVar(&conf.project, "project", "",
 		"project ID of the topic/subscription (currently required)")
-	flag.StringVar(&opt.subscription,
+	flag.StringVar(&conf.subscription,
 		"subscription", "", "subscription ID (required)")
-	flag.StringVar(&opt.credentials, "credentials", "",
+	flag.StringVar(&conf.credentials, "credentials", "",
 		"path to service account credentials (currently required)")
-	flag.IntVar(&opt.parallelism, "parallelism", 1,
+	flag.IntVar(&conf.parallelism, "parallelism", 1,
 		"maximum number of tasks executed in parallel")
-	flag.StringVar(&opt.tasklogdir, "tasklogdir", ".",
-		"path of task logs")
-	flag.IntVar(&opt.maxtasklogkb, "maxtasklogkb", 1000,
+	flag.StringVar(&conf.tasklogdir, "tasklogdir", ".",
+		"task log directory")
+	flag.IntVar(&conf.maxtasklogkb, "maxtasklogkb", 1000,
 		"size in KB per task log file, which triggres log rotation")
-	flag.DurationVar(&opt.taskttl, "taskttl", time.Minute*120,
+	flag.DurationVar(&conf.taskttl, "taskttl", time.Minute*120,
 		"TTL (time-to-live) duration of the task")
-	flag.DurationVar(&opt.commandtimeout, "commandtimeout", time.Second*60,
+	flag.DurationVar(&conf.commandtimeout, "commandtimeout", time.Second*60,
 		"timeout duration of a single command execution")
-	flag.DurationVar(&opt.termtimeout, "termtimeout", time.Second*5,
+	flag.DurationVar(&conf.termtimeout, "termtimeout", time.Second*5,
 		"timeout duration of the first command termination attempt by SIGTERM")
 	flag.Parse()
 
-	if opt.project == "" {
+	if conf.project == "" {
 		fmt.Fprintf(os.Stderr, "--project required\n")
 		os.Exit(1)
 	}
-	if opt.subscription == "" {
+	if conf.subscription == "" {
 		fmt.Fprintf(os.Stderr, "--subscription required\n")
 		os.Exit(1)
 	}
-	if opt.credentials == "" {
+	if conf.credentials == "" {
 		fmt.Fprintf(os.Stderr, "--credentials required\n")
 		os.Exit(1)
 	}
-	if opt.parallelism < 1 {
+	if conf.parallelism < 1 {
 		fmt.Fprintf(os.Stderr, "--parallelism requires positive number")
 		os.Exit(1)
 	}
@@ -63,7 +65,7 @@ func parseOpt() opt {
 		fmt.Fprintf(os.Stderr, "command required\n")
 		os.Exit(1)
 	}
-	opt.command = flag.Arg(0)
-	opt.args = flag.Args()[1:]
-	return opt
+	conf.command = flag.Arg(0)
+	conf.args = flag.Args()[1:]
+	return conf
 }
