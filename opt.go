@@ -16,7 +16,7 @@ type opt struct {
 	parallelism    int
 	tasklogdir     string
 	maxtasklogkb   int
-	retrytimeout   time.Duration
+	taskttl        time.Duration
 	commandtimeout time.Duration
 	termtimeout    time.Duration
 }
@@ -35,8 +35,8 @@ func parseOpt() opt {
 		"path of task logs")
 	flag.IntVar(&opt.maxtasklogkb, "maxtasklogkb", 1000,
 		"size in KB per task log file, which triggres log rotation")
-	flag.DurationVar(&opt.retrytimeout, "retrytimeout", time.Minute*120,
-		"maximum duration from publishing until last retry")
+	flag.DurationVar(&opt.taskttl, "taskttl", time.Minute*120,
+		"TTL (time-to-live) duration of the task")
 	flag.DurationVar(&opt.commandtimeout, "commandtimeout", time.Second*60,
 		"timeout duration of a single command execution")
 	flag.DurationVar(&opt.termtimeout, "termtimeout", time.Second*5,

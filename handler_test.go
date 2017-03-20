@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-// test handleTasks
+// test handleTillShutdown
 
 func makeHandleSingleTaskFunc(callCount *int, actions []handleSingleTaskFunc) handleSingleTaskFunc {
-	return func(handler *taskHandler, msg *pubsub.Message) resultNotifier {
+	return func(handler *taskHandler, msg *pubsub.Message) msgNotifier {
 		index := *callCount
 		*callCount += 1
 		if index >= len(actions) {
@@ -27,41 +27,41 @@ func makeHandleSingleTaskFunc(callCount *int, actions []handleSingleTaskFunc) ha
 	}
 }
 
-type fakeResultNotifier struct {
+type fakeMsgNotifier struct {
 	desc       string
 	isNotified bool
 }
 
-func (notifier *fakeResultNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
+func (notifier *fakeMsgNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
 	log.Printf("notified %s", notifier.desc)
 	notifier.isNotified = true
 }
 
-func TestHandleTasks(t *testing.T) {
+func TestHandleTillShutdown(t *testing.T) {
 	reqCh := make(chan bool, 4)
 	respCh := make(chan *pubsub.Message, 3)
 	doneCh := make(chan bool, 1)
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	not1 := &fakeResultNotifier{desc: "not1"}
-	not2 := &fakeResultNotifier{desc: "not2"}
-	not3 := &fakeResultNotifier{desc: "not3"}
+	not1 := &fakeMsgNotifier{desc: "not1"}
+	not2 := &fakeMsgNotifier{desc: "not2"}
+	not3 := &fakeMsgNotifier{desc: "not3"}
 	handler := &taskHandler{
 		id:     "handler#001",
 		reqCh:  reqCh,
 		respCh: respCh,
 		doneCh: doneCh,
 		handleSingleTask: makeHandleSingleTaskFunc(&callCount, []handleSingleTaskFunc{
-			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { return not1 },
-			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { return not2 },
-			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { cancel(); return not3 },
+			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not1 },
+			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not2 },
+			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { cancel(); return not3 },
 		}),
 	}
 	respCh <- nil
 	respCh <- nil
 	respCh <- nil
-	go handler.handleTasks(ctx)
+	go handler.handleTillShutdown(ctx)
 	<-doneCh
 	if callCount != 3 {
 		t.Errorf("handleSingleTask must be called 3 times, but called %d times", callCount)
@@ -80,8 +80,8 @@ func TestHandleSingleTaskAckForExceedRetryDeadline(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:           "handler#001",
-		retrytimeout: time.Minute * 10,
+		id:      "handler#001",
+		taskttl: time.Minute * 10,
 		now: func() time.Time {
 			return pubTime.Add(time.Minute*10 + time.Second)
 		},
@@ -99,8 +99,8 @@ func TestHandleSingleTaskNackForLogRotationFailure(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:           "handler#001",
-		retrytimeout: time.Minute * 10,
+		id:      "handler#001",
+		taskttl: time.Minute * 10,
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -121,8 +121,8 @@ func TestHandleSingleTaskNackForLogOpeningFailure(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:           "handler#001",
-		retrytimeout: time.Minute * 10,
+		id:      "handler#001",
+		taskttl: time.Minute * 10,
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -160,8 +160,8 @@ func TestHandleSingleTaskAckForCommandSuccess(t *testing.T) {
 	}
 	fwc := &fakeWriteCloser{}
 	handler := &taskHandler{
-		id:           "handler#001",
-		retrytimeout: time.Minute * 10,
+		id:      "handler#001",
+		taskttl: time.Minute * 10,
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -189,8 +189,8 @@ func TestHandleSingleTaskAckForCommandFailure(t *testing.T) {
 	}
 	fwc := &fakeWriteCloser{}
 	handler := &taskHandler{
-		id:           "handler#001",
-		retrytimeout: time.Minute * 10,
+		id:      "handler#001",
+		taskttl: time.Minute * 10,
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -219,13 +219,13 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 		t.Errorf("could not create a temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	tasklogname := tempDir + "/task.log"
+	tasklogpath := tempDir + "/task.log"
 	content := bytes.Repeat([]byte{0x5c}, 2001)
-	ioutil.WriteFile(tasklogname, content, 0644)
+	ioutil.WriteFile(tasklogpath, content, 0644)
 
 	handler := &taskHandler{
 		id:           "handler#001",
-		tasklogname:  tasklogname,
+		tasklogpath:  tasklogpath,
 		maxtasklogkb: 2,
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -236,17 +236,17 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 		t.Error("must not cause error, but: %v", err)
 	}
 
-	prevtasklogname := tasklogname + ".prev"
-	prevContent, err := ioutil.ReadFile(prevtasklogname)
+	prevlogpath := tasklogpath + ".prev"
+	prevContent, err := ioutil.ReadFile(prevlogpath)
 	if err != nil {
-		t.Errorf("task log not rotated to %s", prevtasklogname)
+		t.Errorf("task log not rotated to %s", prevlogpath)
 	}
 
 	if bytes.Compare(prevContent, content) != 0 {
 		t.Errorf("not expected content in prev task log: %v", prevContent)
 	}
 
-	stat, err := os.Stat(tasklogname)
+	stat, err := os.Stat(tasklogpath)
 	if stat != nil || !os.IsNotExist(err) {
 		t.Errorf("old task log still exists: err=%v", err)
 	}
@@ -258,13 +258,13 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 		t.Errorf("could not create a temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
-	tasklogname := tempDir + "/task.log"
+	tasklogpath := tempDir + "/task.log"
 	content := bytes.Repeat([]byte{0x5c}, 2000)
-	ioutil.WriteFile(tasklogname, content, 0644)
+	ioutil.WriteFile(tasklogpath, content, 0644)
 
 	handler := &taskHandler{
 		id:           "handler#001",
-		tasklogname:  tasklogname,
+		tasklogpath:  tasklogpath,
 		maxtasklogkb: 2,
 	}
 
@@ -277,14 +277,14 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 		t.Error("must not cause error, but: %v", err)
 	}
 
-	prevtasklogname := tasklogname + ".prev"
-	if _, err := os.Stat(prevtasklogname); !os.IsNotExist(err) {
+	prevlogpath := tasklogpath + ".prev"
+	if _, err := os.Stat(prevlogpath); !os.IsNotExist(err) {
 		t.Errorf("prev log file must not exist, but: %v", err)
 	}
 
-	actualContent, err := ioutil.ReadFile(tasklogname)
+	actualContent, err := ioutil.ReadFile(tasklogpath)
 	if err != nil {
-		t.Errorf("cannot read task log %s: %v", tasklogname)
+		t.Errorf("cannot read task log %s: %v", tasklogpath)
 	}
 
 	if bytes.Compare(actualContent, content) != 0 {
@@ -299,10 +299,10 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	tasklogname := tempDir + "/nosuch.log"
+	tasklogpath := tempDir + "/nosuch.log"
 	handler := &taskHandler{
 		id:           "handler#001",
-		tasklogname:  tasklogname,
+		tasklogpath:  tasklogpath,
 		maxtasklogkb: 2,
 	}
 
@@ -314,8 +314,8 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 		t.Error("must not cause error, but: %v", err)
 	}
 
-	prevtasklogname := tasklogname + ".prev"
-	if _, err := os.Stat(prevtasklogname); !os.IsNotExist(err) {
+	prevlogpath := tasklogpath + ".prev"
+	if _, err := os.Stat(prevlogpath); !os.IsNotExist(err) {
 		t.Errorf("prev log file must not exist, but: %v", err)
 	}
 }
@@ -329,10 +329,10 @@ func TestRotateTaskLogDoNotRotateUnstattableLog(t *testing.T) {
 	logDir := tempDir + "/tasklog.d"
 	os.Mkdir(logDir, 0000)
 
-	tasklogname := logDir + "/unstattable.log"
+	tasklogpath := logDir + "/unstattable.log"
 	handler := &taskHandler{
 		id:           "handler#001",
-		tasklogname:  tasklogname,
+		tasklogpath:  tasklogpath,
 		maxtasklogkb: 2,
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -352,15 +352,15 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 	logDir := tempDir + "/log"
 	os.Mkdir(logDir, 0700)
-	tasklogname := logDir + "/task.log"
+	tasklogpath := logDir + "/task.log"
 	content := bytes.Repeat([]byte{0x5c}, 2001)
-	ioutil.WriteFile(tasklogname, content, 0644)
+	ioutil.WriteFile(tasklogpath, content, 0644)
 	os.Chmod(logDir, 0500)
 	defer os.Chmod(logDir, 0700)
 
 	handler := &taskHandler{
 		id:           "handler#001",
-		tasklogname:  tasklogname,
+		tasklogpath:  tasklogpath,
 		maxtasklogkb: 2,
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -371,14 +371,14 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 		t.Error("must cause error, but not")
 	}
 
-	prevtasklogname := tasklogname + ".prev"
-	if _, err := os.Stat(prevtasklogname); !os.IsNotExist(err) {
+	prevlogpath := tasklogpath + ".prev"
+	if _, err := os.Stat(prevlogpath); !os.IsNotExist(err) {
 		t.Errorf("prev log file must not exist, but: %v", err)
 	}
 
-	actualContent, err := ioutil.ReadFile(tasklogname)
+	actualContent, err := ioutil.ReadFile(tasklogpath)
 	if err != nil {
-		t.Errorf("cannot read task log %s: %v", tasklogname)
+		t.Errorf("cannot read task log %s: %v", tasklogpath)
 	}
 
 	if bytes.Compare(actualContent, content) != 0 {

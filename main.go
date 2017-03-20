@@ -65,14 +65,14 @@ func main() {
 			args:           opt.args,
 			commandtimeout: opt.commandtimeout,
 			termtimeout:    opt.termtimeout,
-			retrytimeout:   opt.retrytimeout,
+			taskttl:        opt.taskttl,
 			respCh:         respCh,
 			reqCh:          reqCh,
 			doneCh:         doneCh,
-			tasklogname:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
+			tasklogpath:    fmt.Sprintf("%s/task%d.log", opt.tasklogdir, i),
 			maxtasklogkb:   opt.maxtasklogkb,
 		})
-		go handler.handleTasks(appCtx)
+		go handler.handleTillShutdown(appCtx)
 	}
 
 	awaitShutdown(cancelApp, doneChs)
