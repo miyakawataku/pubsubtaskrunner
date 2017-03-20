@@ -23,6 +23,13 @@ type taskPuller struct {
 	initMsgIter initMsgIterFunc
 }
 
+// makePullerWithDefault makes a puller struct setting the default values.
+func makePullerWithDefault(puller taskPuller) *taskPuller {
+	puller.initMsgIter = initMsgIter
+	puller.fetchMsg = fetchMsg
+	return &puller
+}
+
 // msgIter is the type of *pubsub.MessageIterator.
 type msgIter interface {
 	Next() (*pubsub.Message, error)

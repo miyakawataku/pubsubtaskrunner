@@ -42,14 +42,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not make Pub/Sub client: %v", err)
 	}
-	puller := &taskPuller{
+	puller := makePullerWithDefault(taskPuller{
 		subs:         psClient.Subscription(conf.subscription),
 		maxExtension: conf.commandtimeout * time.Second * 5,
 		respCh:       respCh,
 		reqCh:        reqCh,
-		initMsgIter:  initMsgIter,
-		fetchMsg:     fetchMsg,
-	}
+	})
 	go puller.pullTillShutdown(appCtx)
 
 	// start handlers
