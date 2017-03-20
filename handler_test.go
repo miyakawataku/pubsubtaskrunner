@@ -4,12 +4,72 @@ import (
 	"bytes"
 	"cloud.google.com/go/pubsub"
 	"errors"
+	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 	"time"
 )
+
+// test handleTasks
+
+func makeHandleSingleTaskFunc(callCount *int, actions []handleSingleTaskFunc) handleSingleTaskFunc {
+	return func(handler *taskHandler, msg *pubsub.Message) resultNotifier {
+		index := *callCount
+		*callCount += 1
+		if index >= len(actions) {
+			return nil
+		}
+		action := actions[index]
+		return action(handler, msg)
+	}
+}
+
+type fakeResultNotifier struct {
+	desc       string
+	isNotified bool
+}
+
+func (notifier *fakeResultNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
+	log.Printf("notified %s", notifier.desc)
+	notifier.isNotified = true
+}
+
+func TestHandleTasks(t *testing.T) {
+	reqCh := make(chan bool, 4)
+	respCh := make(chan *pubsub.Message, 3)
+	doneCh := make(chan bool, 1)
+	callCount := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	not1 := &fakeResultNotifier{desc: "not1"}
+	not2 := &fakeResultNotifier{desc: "not2"}
+	not3 := &fakeResultNotifier{desc: "not3"}
+	handler := &taskHandler{
+		id:     "handler#001",
+		reqCh:  reqCh,
+		respCh: respCh,
+		doneCh: doneCh,
+		handleSingleTask: makeHandleSingleTaskFunc(&callCount, []handleSingleTaskFunc{
+			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { return not1 },
+			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { return not2 },
+			func(handler *taskHandler, msg *pubsub.Message) resultNotifier { cancel(); return not3 },
+		}),
+	}
+	respCh <- nil
+	respCh <- nil
+	respCh <- nil
+	go handler.handleTasks(ctx)
+	<-doneCh
+	if callCount != 3 {
+		t.Errorf("handleSingleTask must be called 3 times, but called %d times", callCount)
+	}
+	if !not1.isNotified || !not2.isNotified || !not3.isNotified {
+		t.Errorf("some notifier not invoked: %v, %v, %v", not1, not2, not3)
+	}
+}
 
 // test handleSingleTask
 

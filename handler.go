@@ -61,35 +61,39 @@ func (handler *taskHandler) handleTasks(ctx context.Context) {
 	}
 }
 
-type resultNotifier struct {
+type resultNotifier interface {
+	notify(handler *taskHandler, msg *pubsub.Message)
+}
+
+type fixedStatusResultNotifier struct {
 	result bool
 	desc   string
 }
 
-func (rn *resultNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
+func (rn *fixedStatusResultNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
 	log.Printf("%s: message=%s: %s the message", handler.id, msg.ID, rn.desc)
 	msg.Done(rn.result)
 }
 
 var (
-	ack  *resultNotifier
-	nack *resultNotifier
+	ack  resultNotifier
+	nack resultNotifier
 )
 
 func init() {
-	ack = &resultNotifier{
+	ack = &fixedStatusResultNotifier{
 		result: true,
 		desc:   "ack",
 	}
-	nack = &resultNotifier{
+	nack = &fixedStatusResultNotifier{
 		result: false,
 		desc:   "nack",
 	}
 }
 
-type handleSingleTaskFunc func(handler *taskHandler, msg *pubsub.Message) *resultNotifier
+type handleSingleTaskFunc func(handler *taskHandler, msg *pubsub.Message) resultNotifier
 
-func handleSingleTask(handler *taskHandler, msg *pubsub.Message) *resultNotifier {
+func handleSingleTask(handler *taskHandler, msg *pubsub.Message) resultNotifier {
 	retryDeadline := msg.PublishTime.Add(handler.retrytimeout)
 	if handler.now().After(retryDeadline) {
 		log.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
