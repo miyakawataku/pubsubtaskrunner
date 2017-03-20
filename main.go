@@ -12,22 +12,18 @@ import (
 	"time"
 )
 
+// newPsClient returns a Pub/Sub client.
 func newPsClient(opt opt, ctx context.Context) (*pubsub.Client, error) {
 	clientOpts := option.WithServiceAccountFile(opt.credentials)
 	return pubsub.NewClient(ctx, opt.project, clientOpts)
 }
 
-func awaitShutdown(cancelApp context.CancelFunc, doneChs []<-chan bool) {
+// awaitSignal blocks till SIGINT or SIGTERM is sent.
+func awaitSignal() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 	signal.Stop(sigChan)
-	log.Print("start graceful shutdown")
-	cancelApp()
-	for _, doneCh := range doneChs {
-		<-doneCh
-	}
-	log.Print("shutdown succeeded")
 }
 
 func main() {
@@ -36,6 +32,8 @@ func main() {
 	opt := parseOpt()
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
+
 	respCh := make(chan *pubsub.Message)
 	reqCh := make(chan bool, opt.parallelism)
 
@@ -75,5 +73,12 @@ func main() {
 		go handler.handleTillShutdown(appCtx)
 	}
 
-	awaitShutdown(cancelApp, doneChs)
+	awaitSignal()
+
+	log.Print("start graceful shutdown")
+	cancelApp()
+	for _, doneCh := range doneChs {
+		<-doneCh
+	}
+	log.Print("shutdown succeeded")
 }
