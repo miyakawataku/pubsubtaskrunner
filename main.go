@@ -14,8 +14,12 @@ import (
 
 // newPsClient returns a Pub/Sub client.
 func newPsClient(conf conf, ctx context.Context) (*pubsub.Client, error) {
-	clientOpts := option.WithServiceAccountFile(conf.credentials)
-	return pubsub.NewClient(ctx, conf.project, clientOpts)
+	if conf.credentials == "" {
+		return pubsub.NewClient(ctx, conf.project)
+	} else {
+		clientOpts := option.WithServiceAccountFile(conf.credentials)
+		return pubsub.NewClient(ctx, conf.project, clientOpts)
+	}
 }
 
 // awaitSignal blocks till SIGINT or SIGTERM is sent.

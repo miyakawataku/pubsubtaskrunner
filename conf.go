@@ -26,11 +26,11 @@ type conf struct {
 func readConf() conf {
 	conf := conf{}
 	flag.StringVar(&conf.project, "project", "",
-		"project ID of the topic/subscription (currently required)")
+		"project ID of the topic/subscription (required)")
 	flag.StringVar(&conf.subscription,
 		"subscription", "", "subscription ID (required)")
 	flag.StringVar(&conf.credentials, "credentials", "",
-		"path to service account credentials (currently required)")
+		"path to service account credentials (default to “Application Default Credentials”)")
 	flag.IntVar(&conf.parallelism, "parallelism", 1,
 		"maximum number of tasks executed in parallel")
 	flag.StringVar(&conf.tasklogdir, "tasklogdir", ".",
@@ -51,10 +51,6 @@ func readConf() conf {
 	}
 	if conf.subscription == "" {
 		fmt.Fprintf(os.Stderr, "--subscription required\n")
-		os.Exit(1)
-	}
-	if conf.credentials == "" {
-		fmt.Fprintf(os.Stderr, "--credentials required\n")
 		os.Exit(1)
 	}
 	if conf.parallelism < 1 {
