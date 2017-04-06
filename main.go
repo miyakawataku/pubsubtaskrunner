@@ -30,11 +30,8 @@ func awaitSignal() {
 	signal.Stop(sigChan)
 }
 
-func main() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	log.SetPrefix(fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid()))
-	conf := readConf()
-
+// doMain does main job after reading configuration.
+func doMain(conf conf, awaitSignal func()) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 
@@ -83,4 +80,11 @@ func main() {
 		<-doneCh
 	}
 	log.Print("shutdown succeeded")
+}
+
+func main() {
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
+	log.SetPrefix(fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid()))
+	conf := readConf()
+	doMain(conf, awaitSignal)
 }
