@@ -191,7 +191,7 @@ func TestInitMsgIterRetry(t *testing.T) {
 	}
 }
 
-func TestinitMsgIterShutdownOnCancel(t *testing.T) {
+func TestInitMsgIterShutdownOnCancel(t *testing.T) {
 	canceledErr := errors.New("canceled")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -213,7 +213,7 @@ func TestinitMsgIterShutdownOnCancel(t *testing.T) {
 	}
 }
 
-func TestinitMsgIterReturnIterIfNoErrorEvenAfterCancel(t *testing.T) {
+func TestInitMsgIterReturnIterIfNoErrorEvenAfterCancel(t *testing.T) {
 	it := new(pubsub.MessageIterator)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

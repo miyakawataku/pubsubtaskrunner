@@ -7,7 +7,6 @@ import (
 	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"testing"
 	"time"
@@ -28,12 +27,13 @@ func makeHandleSingleTaskFunc(callCount *int, actions []handleSingleTaskFunc) ha
 }
 
 type fakeMsgNotifier struct {
+	t          *testing.T
 	desc       string
 	isNotified bool
 }
 
 func (notifier *fakeMsgNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
-	log.Printf("notified %s", notifier.desc)
+	notifier.t.Logf("notified %s", notifier.desc)
 	notifier.isNotified = true
 }
 
@@ -44,9 +44,9 @@ func TestHandleTillShutdown(t *testing.T) {
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	not1 := &fakeMsgNotifier{desc: "not1"}
-	not2 := &fakeMsgNotifier{desc: "not2"}
-	not3 := &fakeMsgNotifier{desc: "not3"}
+	not1 := &fakeMsgNotifier{t: t, desc: "not1"}
+	not2 := &fakeMsgNotifier{t: t, desc: "not2"}
+	not3 := &fakeMsgNotifier{t: t, desc: "not3"}
 	handler := &taskHandler{
 		id:     "handler#001",
 		reqCh:  reqCh,
@@ -88,7 +88,7 @@ func TestHandleSingleTaskAckForExceedRetryDeadline(t *testing.T) {
 	}
 	notifier := handleSingleTask(handler, msg)
 	if notifier != ack {
-		t.Error("handleSingleTask must return ack because of exceeded deadline, but returned %v", notifier)
+		t.Errorf("handleSingleTask must return ack because of exceeded deadline, but returned %v", notifier)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestHandleSingleTaskNackForLogRotationFailure(t *testing.T) {
 	}
 	notifier := handleSingleTask(handler, msg)
 	if notifier != nack {
-		t.Error("handleSingleTask must return nack because of log rotation failure, but returned %v", notifier)
+		t.Errorf("handleSingleTask must return nack because of log rotation failure, but returned %v", notifier)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestHandleSingleTaskNackForLogOpeningFailure(t *testing.T) {
 	}
 	notifier := handleSingleTask(handler, msg)
 	if notifier != nack {
-		t.Error("handleSingleTask must return nack because of log opening failure, but returned %v", notifier)
+		t.Errorf("handleSingleTask must return nack because of log opening failure, but returned %v", notifier)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestHandleSingleTaskAckForCommandSuccess(t *testing.T) {
 	}
 	notifier := handleSingleTask(handler, msg)
 	if notifier != ack {
-		t.Error("handleSingleTask must return ack because of log command success, but returned %v", notifier)
+		t.Errorf("handleSingleTask must return ack because of log command success, but returned %v", notifier)
 	}
 }
 
@@ -206,7 +206,7 @@ func TestHandleSingleTaskAckForCommandFailure(t *testing.T) {
 	}
 	notifier := handleSingleTask(handler, msg)
 	if notifier != nack {
-		t.Error("handleSingleTask must return nack because of log command failure, but returned %v", notifier)
+		t.Errorf("handleSingleTask must return nack because of log command failure, but returned %v", notifier)
 	}
 
 }
@@ -217,6 +217,7 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "pubsubtaskrunnertest")
 	if err != nil {
 		t.Errorf("could not create a temp dir: %v", err)
+		return
 	}
 	defer os.RemoveAll(tempDir)
 	tasklogpath := tempDir + "/task.log"
@@ -233,7 +234,7 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 		t.Error("task log must be rotated, but not")
 	}
 	if err != nil {
-		t.Error("must not cause error, but: %v", err)
+		t.Errorf("must not cause error, but: %v", err)
 	}
 
 	prevlogpath := tasklogpath + ".prev"
@@ -256,6 +257,7 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "pubsubtaskrunnertest")
 	if err != nil {
 		t.Errorf("could not create a temp dir: %v", err)
+		return
 	}
 	defer os.RemoveAll(tempDir)
 	tasklogpath := tempDir + "/task.log"
@@ -274,7 +276,7 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 		t.Error("task log must not be rotated, but was")
 	}
 	if err != nil {
-		t.Error("must not cause error, but: %v", err)
+		t.Errorf("must not cause error, but: %v", err)
 	}
 
 	prevlogpath := tasklogpath + ".prev"
@@ -284,7 +286,7 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 
 	actualContent, err := ioutil.ReadFile(tasklogpath)
 	if err != nil {
-		t.Errorf("cannot read task log %s: %v", tasklogpath)
+		t.Errorf("cannot read task log %s: %v", tasklogpath, err)
 	}
 
 	if bytes.Compare(actualContent, content) != 0 {
@@ -296,6 +298,7 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "pubsubtaskrunnertest")
 	if err != nil {
 		t.Errorf("could not create a temp dir: %v", err)
+		return
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -311,7 +314,7 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 		t.Error("task log must not be rotated, but was")
 	}
 	if err != nil {
-		t.Error("must not cause error, but: %v", err)
+		t.Errorf("must not cause error, but: %v", err)
 	}
 
 	prevlogpath := tasklogpath + ".prev"
@@ -324,6 +327,7 @@ func TestRotateTaskLogDoNotRotateUnstattableLog(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "pubsubtaskrunnertest")
 	if err != nil {
 		t.Errorf("could not create a temp dir: %v", err)
+		return
 	}
 	defer os.RemoveAll(tempDir)
 	logDir := tempDir + "/tasklog.d"
@@ -348,6 +352,7 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "pubsubtaskrunnertest")
 	if err != nil {
 		t.Errorf("could not create a temp dir: %v", err)
+		return
 	}
 	defer os.RemoveAll(tempDir)
 	logDir := tempDir + "/log"
@@ -378,7 +383,7 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 
 	actualContent, err := ioutil.ReadFile(tasklogpath)
 	if err != nil {
-		t.Errorf("cannot read task log %s: %v", tasklogpath)
+		t.Errorf("cannot read task log %s: %v", tasklogpath, err)
 	}
 
 	if bytes.Compare(actualContent, content) != 0 {
