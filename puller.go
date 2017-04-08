@@ -1,10 +1,11 @@
 package main
 
 import (
-	"cloud.google.com/go/pubsub"
-	"golang.org/x/net/context"
 	"log"
 	"time"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
 )
 
 // taskPuller pulls Pub/Sub messages on requests from handlers,

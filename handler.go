@@ -2,16 +2,17 @@ package main
 
 import (
 	"bytes"
-	"cloud.google.com/go/pubsub"
 	"errors"
 	"fmt"
-	"golang.org/x/net/context"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
 )
 
 // taskHandler executes the command with a message content as the standard input.

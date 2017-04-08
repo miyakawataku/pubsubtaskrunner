@@ -1,15 +1,16 @@
 package main
 
 import (
-	"cloud.google.com/go/pubsub"
 	"errors"
 	"fmt"
-	"golang.org/x/net/context"
-	"google.golang.org/api/option"
 	"io/ioutil"
 	"os"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
+	"google.golang.org/api/option"
 )
 
 type e2eTestConf struct {

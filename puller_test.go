@@ -1,10 +1,11 @@
 package main
 
 import (
-	"cloud.google.com/go/pubsub"
 	"errors"
-	"golang.org/x/net/context"
 	"testing"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
 )
 
 // test puller.pullTillShutdown

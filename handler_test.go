@@ -2,14 +2,15 @@ package main
 
 import (
 	"bytes"
-	"cloud.google.com/go/pubsub"
 	"errors"
-	"golang.org/x/net/context"
 	"io"
 	"io/ioutil"
 	"os"
 	"testing"
 	"time"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
 )
 
 // test handleTillShutdown

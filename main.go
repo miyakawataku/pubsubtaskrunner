@@ -1,15 +1,16 @@
 package main
 
 import (
-	"cloud.google.com/go/pubsub"
 	"fmt"
-	"golang.org/x/net/context"
-	"google.golang.org/api/option"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"cloud.google.com/go/pubsub"
+	"golang.org/x/net/context"
+	"google.golang.org/api/option"
 )
 
 // newPsClient returns a Pub/Sub client.
