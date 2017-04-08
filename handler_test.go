@@ -39,9 +39,9 @@ func (notifier *fakeMsgNotifier) notify(handler *taskHandler, msg *pubsub.Messag
 }
 
 func TestHandleTillShutdown(t *testing.T) {
-	reqCh := make(chan bool, 4)
+	reqCh := make(chan struct{}, 4)
 	respCh := make(chan *pubsub.Message, 3)
-	doneCh := make(chan bool, 1)
+	doneCh := make(chan struct{}, 1)
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

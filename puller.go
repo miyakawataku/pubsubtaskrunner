@@ -18,7 +18,7 @@ type taskPuller struct {
 	respCh chan<- *pubsub.Message
 
 	// reqCh is the channel of requests from handlers.
-	reqCh <-chan bool
+	reqCh <-chan struct{}
 
 	fetchMsg    fetchMsgFunc
 	initMsgIter initMsgIterFunc

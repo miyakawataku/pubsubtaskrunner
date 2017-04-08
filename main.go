@@ -37,7 +37,7 @@ func doMain(conf conf, awaitSignal func()) {
 	defer cancelApp()
 
 	respCh := make(chan *pubsub.Message)
-	reqCh := make(chan bool, conf.parallelism)
+	reqCh := make(chan struct{}, conf.parallelism)
 
 	// start puller
 	psClient, err := newPsClient(conf, appCtx)
@@ -53,9 +53,9 @@ func doMain(conf conf, awaitSignal func()) {
 	go puller.pullTillShutdown(appCtx)
 
 	// start handlers
-	doneChs := []<-chan bool{}
+	doneChs := []<-chan struct{}{}
 	for i := 0; i < conf.parallelism; i += 1 {
-		doneCh := make(chan bool, 1)
+		doneCh := make(chan struct{}, 1)
 		doneChs = append(doneChs, doneCh)
 		handler := makeHandlerWithDefault(taskHandler{
 			id:             fmt.Sprintf("handler#%d", i),

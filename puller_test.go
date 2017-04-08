@@ -37,7 +37,7 @@ func makeFakeFetchMsg(callCount *int, actions []func() *pubsub.Message) fetchMsg
 }
 
 func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
-	reqCh := make(chan bool)
+	reqCh := make(chan struct{})
 	initCallCount := 0
 	it := &fakeMessageIterator{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -49,10 +49,10 @@ func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
 			func() msgIter { return it },
 		}),
 	}
-	doneCh := make(chan bool)
+	doneCh := make(chan struct{})
 	go func() {
 		puller.pullTillShutdown(ctx)
-		doneCh <- true
+		doneCh <- struct{}{}
 	}()
 	cancel()
 	<-doneCh
@@ -63,7 +63,7 @@ func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
 
 func TestPullTillShutdownBreakWhileWaitingMessage(t *testing.T) {
 	respCh := make(chan *pubsub.Message, 3)
-	reqCh := make(chan bool, 3)
+	reqCh := make(chan struct{}, 3)
 	initCallCount := 0
 	fetchCallCount := 0
 	it := &fakeMessageIterator{}
@@ -84,14 +84,14 @@ func TestPullTillShutdownBreakWhileWaitingMessage(t *testing.T) {
 			func() *pubsub.Message { cancel(); return nil },
 		}),
 	}
-	doneCh := make(chan bool)
+	doneCh := make(chan struct{})
 	go func() {
 		puller.pullTillShutdown(ctx)
-		doneCh <- true
+		doneCh <- struct{}{}
 	}()
-	reqCh <- true
-	reqCh <- true
-	reqCh <- true
+	reqCh <- struct{}{}
+	reqCh <- struct{}{}
+	reqCh <- struct{}{}
 	resMsg1 := <-respCh
 	resMsg2 := <-respCh
 	<-doneCh
@@ -122,10 +122,10 @@ func TestPullTillShutdownBreakBeforeInitialized(t *testing.T) {
 		}),
 	}
 	defer cancel()
-	doneCh := make(chan bool)
+	doneCh := make(chan struct{})
 	go func() {
 		puller.pullTillShutdown(ctx)
-		doneCh <- true
+		doneCh <- struct{}{}
 	}()
 	<-doneCh
 	if initCallCount != 1 {

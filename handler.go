@@ -43,13 +43,13 @@ type taskHandler struct {
 	taskttl time.Duration
 
 	// reqCh is the channel of requests to the puller.
-	reqCh chan<- bool
+	reqCh chan<- struct{}
 
 	// respCh is the channel of messages from the puller.
 	respCh <-chan *pubsub.Message
 
 	// doneCh is the channel to notify that the handler is shut down gracefully.
-	doneCh chan bool
+	doneCh chan<- struct{}
 
 	// tasklogpath is the path of the task log file of the handler.
 	tasklogpath string
@@ -81,14 +81,14 @@ func makeHandlerWithDefault(handler taskHandler) *taskHandler {
 func (handler *taskHandler) handleTillShutdown(ctx context.Context) {
 	log.Printf("%s: start", handler.id)
 	for {
-		handler.reqCh <- true
+		handler.reqCh <- struct{}{}
 		select {
 		case msg := <-handler.respCh:
 			notifier := handler.handleSingleTask(handler, msg)
 			notifier.notify(handler, msg)
 		case <-ctx.Done():
 			log.Printf("%s: shutdown", handler.id)
-			handler.doneCh <- true
+			handler.doneCh <- struct{}{}
 			return
 		}
 	}
