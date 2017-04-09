@@ -15,8 +15,8 @@ import (
 	"golang.org/x/net/context"
 )
 
-// taskHandler executes the command with a message content as the standard input.
-type taskHandler struct {
+// taskHandlerConf contains configuration of a taskHandler.
+type taskHandlerConf struct {
 	// id is the ID of the handler.
 	id string
 
@@ -56,6 +56,11 @@ type taskHandler struct {
 
 	// maxtasklogkb is the maximum size of the task log file in KB.
 	maxtasklogkb int
+}
+
+// taskHandler executes the command with a message content as the standard input.
+type taskHandler struct {
+	taskHandlerConf
 
 	// now is Time.now.
 	now func() time.Time
@@ -66,14 +71,16 @@ type taskHandler struct {
 	runCmd           runCmdFunc
 }
 
-// makeHandlerWithDefault makes a handler struct setting the default values.
-func makeHandlerWithDefault(handler taskHandler) *taskHandler {
-	handler.now = time.Now
-	handler.handleSingleTask = handleSingleTask
-	handler.openTaskLog = openTaskLog
-	handler.rotateTaskLog = rotateTaskLog
-	handler.runCmd = runCmd
-	return &handler
+// makeHandler makes a handler from the configuration.
+func makeHandler(hc taskHandlerConf) *taskHandler {
+	return &taskHandler{
+		taskHandlerConf:  hc,
+		now:              time.Now,
+		handleSingleTask: handleSingleTask,
+		openTaskLog:      openTaskLog,
+		rotateTaskLog:    rotateTaskLog,
+		runCmd:           runCmd,
+	}
 }
 
 // handleTillShutdown handles messages sent from the puller.

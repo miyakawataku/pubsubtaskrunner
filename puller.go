@@ -8,9 +8,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-// taskPuller pulls Pub/Sub messages on requests from handlers,
-// then sends the messages to handlers.
-type taskPuller struct {
+type taskPullerConf struct {
 	subs         subs
 	maxExtension time.Duration
 
@@ -19,16 +17,24 @@ type taskPuller struct {
 
 	// reqCh is the channel of requests from handlers.
 	reqCh <-chan struct{}
+}
+
+// taskPuller pulls Pub/Sub messages on requests from handlers,
+// then sends the messages to handlers.
+type taskPuller struct {
+	taskPullerConf
 
 	fetchMsg    fetchMsgFunc
 	initMsgIter initMsgIterFunc
 }
 
 // makePullerWithDefault makes a puller struct setting the default values.
-func makePullerWithDefault(puller taskPuller) *taskPuller {
-	puller.initMsgIter = initMsgIter
-	puller.fetchMsg = fetchMsg
-	return &puller
+func makePuller(pc taskPullerConf) *taskPuller {
+	return &taskPuller{
+		taskPullerConf: pc,
+		initMsgIter:    initMsgIter,
+		fetchMsg:       fetchMsg,
+	}
 }
 
 // msgIter is the type of *pubsub.MessageIterator.

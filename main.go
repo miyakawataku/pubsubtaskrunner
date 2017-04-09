@@ -44,7 +44,7 @@ func doMain(conf conf, awaitSignal func()) {
 	if err != nil {
 		log.Fatalf("could not make Pub/Sub client: %v", err)
 	}
-	puller := makePullerWithDefault(taskPuller{
+	puller := makePuller(taskPullerConf{
 		subs:         psClient.Subscription(conf.subscription),
 		maxExtension: conf.commandtimeout * time.Second * 5,
 		respCh:       respCh,
@@ -57,7 +57,7 @@ func doMain(conf conf, awaitSignal func()) {
 	for i := 0; i < conf.parallelism; i += 1 {
 		doneCh := make(chan struct{}, 1)
 		doneChs = append(doneChs, doneCh)
-		handler := makeHandlerWithDefault(taskHandler{
+		handler := makeHandler(taskHandlerConf{
 			id:             fmt.Sprintf("handler#%d", i),
 			command:        conf.command,
 			args:           conf.args,

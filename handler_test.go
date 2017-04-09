@@ -49,10 +49,12 @@ func TestHandleTillShutdown(t *testing.T) {
 	not2 := &fakeMsgNotifier{t: t, desc: "not2"}
 	not3 := &fakeMsgNotifier{t: t, desc: "not3"}
 	handler := &taskHandler{
-		id:     "handler#001",
-		reqCh:  reqCh,
-		respCh: respCh,
-		doneCh: doneCh,
+		taskHandlerConf: taskHandlerConf{
+			id:     "handler#001",
+			reqCh:  reqCh,
+			respCh: respCh,
+			doneCh: doneCh,
+		},
 		handleSingleTask: makeHandleSingleTaskFunc(&callCount, []handleSingleTaskFunc{
 			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not1 },
 			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not2 },
@@ -81,8 +83,10 @@ func TestHandleSingleTaskAckForExceedRetryDeadline(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:      "handler#001",
-		taskttl: time.Minute * 10,
+		taskHandlerConf: taskHandlerConf{
+			id:      "handler#001",
+			taskttl: time.Minute * 10,
+		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute*10 + time.Second)
 		},
@@ -100,8 +104,10 @@ func TestHandleSingleTaskNackForLogRotationFailure(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:      "handler#001",
-		taskttl: time.Minute * 10,
+		taskHandlerConf: taskHandlerConf{
+			id:      "handler#001",
+			taskttl: time.Minute * 10,
+		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -122,8 +128,10 @@ func TestHandleSingleTaskNackForLogOpeningFailure(t *testing.T) {
 		ID:          "msg001",
 	}
 	handler := &taskHandler{
-		id:      "handler#001",
-		taskttl: time.Minute * 10,
+		taskHandlerConf: taskHandlerConf{
+			id:      "handler#001",
+			taskttl: time.Minute * 10,
+		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -161,8 +169,10 @@ func TestHandleSingleTaskAckForCommandSuccess(t *testing.T) {
 	}
 	fwc := &fakeWriteCloser{}
 	handler := &taskHandler{
-		id:      "handler#001",
-		taskttl: time.Minute * 10,
+		taskHandlerConf: taskHandlerConf{
+			id:      "handler#001",
+			taskttl: time.Minute * 10,
+		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -190,8 +200,10 @@ func TestHandleSingleTaskAckForCommandFailure(t *testing.T) {
 	}
 	fwc := &fakeWriteCloser{}
 	handler := &taskHandler{
-		id:      "handler#001",
-		taskttl: time.Minute * 10,
+		taskHandlerConf: taskHandlerConf{
+			id:      "handler#001",
+			taskttl: time.Minute * 10,
+		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
 		},
@@ -226,9 +238,11 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 	ioutil.WriteFile(tasklogpath, content, 0644)
 
 	handler := &taskHandler{
-		id:           "handler#001",
-		tasklogpath:  tasklogpath,
-		maxtasklogkb: 2,
+		taskHandlerConf: taskHandlerConf{
+			id:           "handler#001",
+			tasklogpath:  tasklogpath,
+			maxtasklogkb: 2,
+		},
 	}
 	isRotated, err := rotateTaskLog(handler)
 	if !isRotated {
@@ -266,9 +280,11 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 	ioutil.WriteFile(tasklogpath, content, 0644)
 
 	handler := &taskHandler{
-		id:           "handler#001",
-		tasklogpath:  tasklogpath,
-		maxtasklogkb: 2,
+		taskHandlerConf: taskHandlerConf{
+			id:           "handler#001",
+			tasklogpath:  tasklogpath,
+			maxtasklogkb: 2,
+		},
 	}
 
 	isRotated, err := rotateTaskLog(handler)
@@ -305,9 +321,11 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 
 	tasklogpath := tempDir + "/nosuch.log"
 	handler := &taskHandler{
-		id:           "handler#001",
-		tasklogpath:  tasklogpath,
-		maxtasklogkb: 2,
+		taskHandlerConf: taskHandlerConf{
+			id:           "handler#001",
+			tasklogpath:  tasklogpath,
+			maxtasklogkb: 2,
+		},
 	}
 
 	isRotated, err := rotateTaskLog(handler)
@@ -336,9 +354,11 @@ func TestRotateTaskLogDoNotRotateUnstattableLog(t *testing.T) {
 
 	tasklogpath := logDir + "/unstattable.log"
 	handler := &taskHandler{
-		id:           "handler#001",
-		tasklogpath:  tasklogpath,
-		maxtasklogkb: 2,
+		taskHandlerConf: taskHandlerConf{
+			id:           "handler#001",
+			tasklogpath:  tasklogpath,
+			maxtasklogkb: 2,
+		},
 	}
 	isRotated, err := rotateTaskLog(handler)
 	if isRotated {
@@ -365,9 +385,11 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 	defer os.Chmod(logDir, 0700)
 
 	handler := &taskHandler{
-		id:           "handler#001",
-		tasklogpath:  tasklogpath,
-		maxtasklogkb: 2,
+		taskHandlerConf: taskHandlerConf{
+			id:           "handler#001",
+			tasklogpath:  tasklogpath,
+			maxtasklogkb: 2,
+		},
 	}
 	isRotated, err := rotateTaskLog(handler)
 	if isRotated {
@@ -396,11 +418,13 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 
 func TestRunCmd(t *testing.T) {
 	handler := &taskHandler{
-		id:             "handler#001",
-		command:        "/bin/cat",
-		args:           []string{"-"},
-		commandtimeout: time.Second * 10,
-		termtimeout:    time.Second,
+		taskHandlerConf: taskHandlerConf{
+			id:             "handler#001",
+			command:        "/bin/cat",
+			args:           []string{"-"},
+			commandtimeout: time.Second * 10,
+			termtimeout:    time.Second,
+		},
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -418,11 +442,13 @@ func TestRunCmd(t *testing.T) {
 
 func TestRunCmdTimeout(t *testing.T) {
 	handler := &taskHandler{
-		id:             "handler#001",
-		command:        "/bin/sleep",
-		args:           []string{"5"},
-		commandtimeout: time.Second,
-		termtimeout:    time.Second,
+		taskHandlerConf: taskHandlerConf{
+			id:             "handler#001",
+			command:        "/bin/sleep",
+			args:           []string{"5"},
+			commandtimeout: time.Second,
+			termtimeout:    time.Second,
+		},
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -437,11 +463,13 @@ func TestRunCmdTimeout(t *testing.T) {
 
 func TestRunCmdTermTimeout(t *testing.T) {
 	handler := &taskHandler{
-		id:             "handler#001",
-		command:        "/bin/sh",
-		args:           []string{"-c", "trap '/bin/true' 15; while /bin/true; do /bin/sleep 100; done"},
-		commandtimeout: time.Second,
-		termtimeout:    time.Second,
+		taskHandlerConf: taskHandlerConf{
+			id:             "handler#001",
+			command:        "/bin/sh",
+			args:           []string{"-c", "trap '/bin/true' 15; while /bin/true; do /bin/sleep 100; done"},
+			commandtimeout: time.Second,
+			termtimeout:    time.Second,
+		},
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",
@@ -456,11 +484,13 @@ func TestRunCmdTermTimeout(t *testing.T) {
 
 func TestRunCmdLaunchError(t *testing.T) {
 	handler := &taskHandler{
-		id:             "handler#001",
-		command:        "/bin/no/such/command.never",
-		args:           []string{},
-		commandtimeout: time.Second,
-		termtimeout:    time.Second,
+		taskHandlerConf: taskHandlerConf{
+			id:             "handler#001",
+			command:        "/bin/no/such/command.never",
+			args:           []string{},
+			commandtimeout: time.Second,
+			termtimeout:    time.Second,
+		},
 	}
 	msg := &pubsub.Message{
 		ID:   "msg#001",

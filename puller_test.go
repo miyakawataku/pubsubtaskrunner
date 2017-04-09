@@ -43,8 +43,10 @@ func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	puller := &taskPuller{
-		subs:  new(pubsub.Subscription),
-		reqCh: reqCh,
+		taskPullerConf: taskPullerConf{
+			subs:  new(pubsub.Subscription),
+			reqCh: reqCh,
+		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { return it },
 		}),
@@ -72,9 +74,11 @@ func TestPullTillShutdownBreakWhileWaitingMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	puller := &taskPuller{
-		subs:   new(pubsub.Subscription),
-		respCh: respCh,
-		reqCh:  reqCh,
+		taskPullerConf: taskPullerConf{
+			subs:   new(pubsub.Subscription),
+			respCh: respCh,
+			reqCh:  reqCh,
+		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { return it },
 		}),
@@ -116,7 +120,9 @@ func TestPullTillShutdownBreakBeforeInitialized(t *testing.T) {
 	initCallCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	puller := &taskPuller{
-		subs: new(pubsub.Subscription),
+		taskPullerConf: taskPullerConf{
+			subs: new(pubsub.Subscription),
+		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { cancel(); return nil },
 		}),
