@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -168,10 +167,10 @@ func handleSingleTask(handler *taskHandler, msg *pubsub.Message) msgNotifier {
 	if err := handler.runCmd(handler, msg, taskLog); err != nil {
 		log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
 		return nack
-	} else {
-		log.Printf("%s: message=%s: command done", handler.id, msg.ID)
-		return ack
 	}
+
+	log.Printf("%s: message=%s: command done", handler.id, msg.ID)
+	return ack
 }
 
 // rotateTaskLogFunc is the type of rotateTaskLog function.
@@ -186,21 +185,20 @@ func rotateTaskLog(handler *taskHandler) (rotated bool, err error) {
 		log.Printf("%s: create new task log %s", handler.id, handler.tasklogpath)
 		return false, nil
 	case err != nil:
-		return false, errors.New(fmt.Sprintf("cannot stat %s: %v", handler.tasklogpath, err))
+		return false, fmt.Errorf("cannot stat %s: %v", handler.tasklogpath, err)
 	}
 
 	if stat.Size() <= int64(handler.maxtasklogkb*1000) {
 		return false, nil
-	} else {
-		prevLogPath := handler.tasklogpath + ".prev"
-		log.Printf("%s: mv task log %s to %s", handler.id, handler.tasklogpath, prevLogPath)
-		if err := os.Rename(handler.tasklogpath, prevLogPath); err != nil {
-			return false, errors.New(fmt.Sprintf(
-				"could not mv task log %s to %s: %v",
-				handler.tasklogpath, prevLogPath, err))
-		}
-		return true, nil
 	}
+
+	prevLogPath := handler.tasklogpath + ".prev"
+	log.Printf("%s: mv task log %s to %s", handler.id, handler.tasklogpath, prevLogPath)
+	if err := os.Rename(handler.tasklogpath, prevLogPath); err != nil {
+		return false, fmt.Errorf("could not mv task log %s to %s: %v", handler.tasklogpath, prevLogPath, err)
+	}
+
+	return true, nil
 }
 
 // openTaskLogFunc is the type of openTaskLog function.

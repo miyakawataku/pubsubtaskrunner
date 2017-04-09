@@ -18,7 +18,7 @@ import (
 func makeHandleSingleTaskFunc(callCount *int, actions []handleSingleTaskFunc) handleSingleTaskFunc {
 	return func(handler *taskHandler, msg *pubsub.Message) msgNotifier {
 		index := *callCount
-		*callCount += 1
+		*callCount++
 		if index >= len(actions) {
 			return nil
 		}
@@ -258,7 +258,7 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 		t.Errorf("task log not rotated to %s", prevlogpath)
 	}
 
-	if bytes.Compare(prevContent, content) != 0 {
+	if !bytes.Equal(prevContent, content) {
 		t.Errorf("not expected content in prev task log: %v", prevContent)
 	}
 
@@ -306,7 +306,7 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 		t.Errorf("cannot read task log %s: %v", tasklogpath, err)
 	}
 
-	if bytes.Compare(actualContent, content) != 0 {
+	if !bytes.Equal(actualContent, content) {
 		t.Errorf("not expected content in task log: %v", actualContent)
 	}
 }
@@ -409,7 +409,7 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 		t.Errorf("cannot read task log %s: %v", tasklogpath, err)
 	}
 
-	if bytes.Compare(actualContent, content) != 0 {
+	if !bytes.Equal(actualContent, content) {
 		t.Errorf("not expected content in task log: %v", actualContent)
 	}
 }
@@ -435,7 +435,7 @@ func TestRunCmd(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if bytes.Compare(buf.Bytes(), []byte("foobar")) != 0 {
+	if !bytes.Equal(buf.Bytes(), []byte("foobar")) {
 		t.Errorf("unexpected output: got %v, want 'foobar'", buf.Bytes())
 	}
 }

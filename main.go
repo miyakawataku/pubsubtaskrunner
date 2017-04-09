@@ -14,13 +14,12 @@ import (
 )
 
 // newPsClient returns a Pub/Sub client.
-func newPsClient(conf conf, ctx context.Context) (*pubsub.Client, error) {
-	if conf.credentials == "" {
-		return pubsub.NewClient(ctx, conf.project)
-	} else {
-		clientOpts := option.WithServiceAccountFile(conf.credentials)
-		return pubsub.NewClient(ctx, conf.project, clientOpts)
+func newPsClient(ctx context.Context, conf conf) (*pubsub.Client, error) {
+	var clientOpts []option.ClientOption
+	if conf.credentials != "" {
+		clientOpts = []option.ClientOption{option.WithServiceAccountFile(conf.credentials)}
 	}
+	return pubsub.NewClient(ctx, conf.project, clientOpts...)
 }
 
 // awaitSignal blocks till SIGINT or SIGTERM is sent.
@@ -40,7 +39,7 @@ func doMain(conf conf, awaitSignal func()) {
 	reqCh := make(chan struct{}, conf.parallelism)
 
 	// start puller
-	psClient, err := newPsClient(conf, appCtx)
+	psClient, err := newPsClient(appCtx, conf)
 	if err != nil {
 		log.Fatalf("could not make Pub/Sub client: %v", err)
 	}
@@ -54,7 +53,7 @@ func doMain(conf conf, awaitSignal func()) {
 
 	// start handlers
 	doneChs := []<-chan struct{}{}
-	for i := 0; i < conf.parallelism; i += 1 {
+	for i := 0; i < conf.parallelism; i++ {
 		doneCh := make(chan struct{}, 1)
 		doneChs = append(doneChs, doneCh)
 		handler := makeHandler(taskHandlerConf{

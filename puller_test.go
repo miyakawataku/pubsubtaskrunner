@@ -13,26 +13,26 @@ import (
 func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFunc {
 	return func(context.Context, subs, []pubsub.PullOption) msgIter {
 		index := *callCount
-		*callCount += 1
+		*callCount++
 		if *callCount > len(actions) {
 			return nil
-		} else {
-			action := actions[index]
-			return action()
 		}
+
+		action := actions[index]
+		return action()
 	}
 }
 
 func makeFakeFetchMsg(callCount *int, actions []func() *pubsub.Message) fetchMsgFunc {
 	return func(ctx context.Context, it msgIter) *pubsub.Message {
 		index := *callCount
-		*callCount += 1
+		*callCount++
 		if *callCount > len(actions) {
 			return nil
-		} else {
-			action := actions[index]
-			return action()
 		}
+
+		action := actions[index]
+		return action()
 	}
 }
 
@@ -150,7 +150,7 @@ type fakeSubs struct {
 
 func (subs *fakeSubs) Pull(ctx context.Context, opts ...pubsub.PullOption) (*pubsub.MessageIterator, error) {
 	index := subs.callCount
-	subs.callCount += 1
+	subs.callCount++
 	if subs.callCount > len(subs.actions) {
 		return nil, errors.New("unexpected call")
 	}
@@ -254,7 +254,7 @@ type fakeMessageIterator struct {
 
 func (it *fakeMessageIterator) Next() (*pubsub.Message, error) {
 	index := it.callCount
-	it.callCount += 1
+	it.callCount++
 	if it.callCount > len(it.actions) {
 		return nil, errors.New("unexpected call")
 	}

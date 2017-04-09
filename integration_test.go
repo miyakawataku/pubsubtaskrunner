@@ -52,8 +52,8 @@ func TestIntegration(t *testing.T) {
 	}
 	doMain(conf, func() { time.Sleep(time.Second * 20) })
 
-	file1, err := ioutil.ReadFile(tempDir + "/task0.log")
-	file2, err := ioutil.ReadFile(tempDir + "/task1.log")
+	file1, _ := ioutil.ReadFile(tempDir + "/task0.log")
+	file2, _ := ioutil.ReadFile(tempDir + "/task1.log")
 	output := string(append(file1, file2...))
 	expected1 := "FOObar\nbarFOO\n"
 	expected2 := "barFOO\nFOObar\n"
