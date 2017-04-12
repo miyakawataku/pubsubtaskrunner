@@ -17,6 +17,8 @@ type taskPullerConf struct {
 
 	// reqCh is the channel of requests from handlers.
 	reqCh <-chan struct{}
+
+	logger *log.Logger
 }
 
 // taskPuller pulls Pub/Sub messages on requests from handlers,
@@ -52,25 +54,25 @@ type subs interface {
 // then sends the messages as responses.
 // The method returns when the context is shutdown.
 func (puller *taskPuller) pullTillShutdown(ctx context.Context) {
-	it := puller.initMsgIter(ctx, puller.subs, puller.makePullOpts())
+	it := puller.initMsgIter(ctx, puller.subs, puller.makePullOpts(), puller.logger)
 	if it == nil {
-		log.Printf("puller: shutdown before being initialized")
+		puller.logger.Printf("puller: shutdown before being initialized")
 		return
 	}
 	defer it.Stop()
 
-	log.Print("puller: initialized")
+	puller.logger.Print("puller: initialized")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("puller: shutdown while waiting request")
+			puller.logger.Printf("puller: shutdown while waiting request")
 			return
 		case <-puller.reqCh:
-			if msg := puller.fetchMsg(ctx, it); msg != nil {
+			if msg := puller.fetchMsg(ctx, it, puller.logger); msg != nil {
 				puller.respCh <- msg
 			} else {
-				log.Printf("puller: shutdown while waiting message")
+				puller.logger.Printf("puller: shutdown while waiting message")
 				return
 			}
 		}
@@ -83,11 +85,11 @@ func (puller *taskPuller) makePullOpts() []pubsub.PullOption {
 }
 
 // initMsgIterFunc is the type of initMsgIter function.
-type initMsgIterFunc func(context.Context, subs, []pubsub.PullOption) msgIter
+type initMsgIterFunc func(context.Context, subs, []pubsub.PullOption, *log.Logger) msgIter
 
 // initMsgIter returns a MessageIterator,
 // or nil if the context is shutdown.
-func initMsgIter(ctx context.Context, subs subs, opts []pubsub.PullOption) msgIter {
+func initMsgIter(ctx context.Context, subs subs, opts []pubsub.PullOption, logger *log.Logger) msgIter {
 	// TODO consider what to do for almost irrecoverable error such as NOTFOUND
 	for {
 		it, err := subs.Pull(ctx, opts...)
@@ -97,15 +99,15 @@ func initMsgIter(ctx context.Context, subs subs, opts []pubsub.PullOption) msgIt
 		if ctx.Err() != nil {
 			return nil
 		}
-		log.Printf("puller: could not initialize; keep retrying: %v", err)
+		logger.Printf("puller: could not initialize; keep retrying: %v", err)
 	}
 }
 
 // fetchMsgFunc is the type of fetchMsg function.
-type fetchMsgFunc func(context.Context, msgIter) *pubsub.Message
+type fetchMsgFunc func(context.Context, msgIter, *log.Logger) *pubsub.Message
 
 // fetchMsg fetches a message, or returns nil if the context is shutdown.
-func fetchMsg(ctx context.Context, it msgIter) *pubsub.Message {
+func fetchMsg(ctx context.Context, it msgIter, logger *log.Logger) *pubsub.Message {
 	for {
 		msg, err := it.Next()
 		if msg != nil {
@@ -114,6 +116,6 @@ func fetchMsg(ctx context.Context, it msgIter) *pubsub.Message {
 		if ctx.Err() != nil {
 			return nil
 		}
-		log.Printf("puller: could not pull message; keep retrying: %v", err)
+		logger.Printf("puller: could not pull message; keep retrying: %v", err)
 	}
 }

@@ -56,6 +56,8 @@ type taskHandlerConf struct {
 
 	// maxtasklogkb is the maximum size of the task log file in KB.
 	maxtasklogkb int
+
+	logger *log.Logger
 }
 
 // taskHandler executes the command with a message content as the standard input.
@@ -86,7 +88,7 @@ func makeHandler(hc taskHandlerConf) *taskHandler {
 // handleTillShutdown handles messages sent from the puller.
 // The method returns when the context is shutdown.
 func (handler *taskHandler) handleTillShutdown(ctx context.Context) {
-	log.Printf("%s: start", handler.id)
+	handler.logger.Printf("%s: start", handler.id)
 	for {
 		handler.reqCh <- struct{}{}
 		select {
@@ -94,7 +96,7 @@ func (handler *taskHandler) handleTillShutdown(ctx context.Context) {
 			notifier := handler.handleSingleTask(handler, msg)
 			notifier.notify(handler, msg)
 		case <-ctx.Done():
-			log.Printf("%s: shutdown", handler.id)
+			handler.logger.Printf("%s: shutdown", handler.id)
 			handler.wg.Done()
 			return
 		}
@@ -114,7 +116,7 @@ type fixedMsgNotifier struct {
 
 // notify acks or nacks the message.
 func (mn *fixedMsgNotifier) notify(handler *taskHandler, msg *pubsub.Message) {
-	log.Printf("%s: message=%s: %s the message", handler.id, msg.ID, mn.desc)
+	handler.logger.Printf("%s: message=%s: %s the message", handler.id, msg.ID, mn.desc)
 	msg.Done(mn.isAcked)
 }
 
@@ -146,31 +148,31 @@ func handleSingleTask(handler *taskHandler, msg *pubsub.Message) msgNotifier {
 	// if the TTL has passed, ack the task because of expiration.
 	taskDeadline := msg.PublishTime.Add(handler.taskttl)
 	if handler.now().After(taskDeadline) {
-		log.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
+		handler.logger.Printf("%s: message=%s: delete task because of exceeded retry deadline %v",
 			handler.id, msg.ID, taskDeadline.In(time.Local))
 		return ack
 	}
 
 	if _, err := handler.rotateTaskLog(handler); err != nil {
-		log.Printf("%s: message=%s: could not rotate task log %s: %v",
+		handler.logger.Printf("%s: message=%s: could not rotate task log %s: %v",
 			handler.id, msg.ID, handler.tasklogpath, err)
 		return nack
 	}
 
 	taskLog, err := handler.openTaskLog(handler)
 	if err != nil {
-		log.Printf("%s: message=%s: could not open task log %s: %v",
+		handler.logger.Printf("%s: message=%s: could not open task log %s: %v",
 			handler.id, msg.ID, handler.tasklogpath, err)
 		return nack
 	}
 	defer taskLog.Close()
 
 	if err := handler.runCmd(handler, msg, taskLog); err != nil {
-		log.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
+		handler.logger.Printf("%s: message=%s: command failed: %v", handler.id, msg.ID, err)
 		return nack
 	}
 
-	log.Printf("%s: message=%s: command done", handler.id, msg.ID)
+	handler.logger.Printf("%s: message=%s: command done", handler.id, msg.ID)
 	return ack
 }
 
@@ -183,7 +185,7 @@ func rotateTaskLog(handler *taskHandler) (rotated bool, err error) {
 	stat, err := os.Stat(handler.tasklogpath)
 	switch {
 	case os.IsNotExist(err):
-		log.Printf("%s: create new task log %s", handler.id, handler.tasklogpath)
+		handler.logger.Printf("%s: create new task log %s", handler.id, handler.tasklogpath)
 		return false, nil
 	case err != nil:
 		return false, fmt.Errorf("cannot stat %s: %v", handler.tasklogpath, err)
@@ -194,7 +196,7 @@ func rotateTaskLog(handler *taskHandler) (rotated bool, err error) {
 	}
 
 	prevLogPath := handler.tasklogpath + ".prev"
-	log.Printf("%s: mv task log %s to %s", handler.id, handler.tasklogpath, prevLogPath)
+	handler.logger.Printf("%s: mv task log %s to %s", handler.id, handler.tasklogpath, prevLogPath)
 	if err := os.Rename(handler.tasklogpath, prevLogPath); err != nil {
 		return false, fmt.Errorf("could not mv task log %s to %s: %v", handler.tasklogpath, prevLogPath, err)
 	}
@@ -251,7 +253,7 @@ func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error 
 		return spawnError{err}
 	}
 	pgid := cmd.Process.Pid
-	log.Printf("%s: message=%s: command-pgid=%d: spawned the command",
+	handler.logger.Printf("%s: message=%s: command-pgid=%d: spawned the command",
 		handler.id, msg.ID, pgid)
 
 	cmdDone := make(chan error, 1)
@@ -261,14 +263,14 @@ func runCmd(handler *taskHandler, msg *pubsub.Message, taskLog io.Writer) error 
 	case err := <-cmdDone:
 		return err
 	case <-time.After(handler.commandtimeout):
-		log.Printf("%s: message=%s: command-pgid=%d: command didn't complete in %v; will SIGTERM process group",
+		handler.logger.Printf("%s: message=%s: command-pgid=%d: command didn't complete in %v; will SIGTERM process group",
 			handler.id, msg.ID, pgid, handler.commandtimeout)
 		syscall.Kill(-pgid, syscall.SIGTERM)
 		select {
 		case <-cmdDone:
 			return cmdTimeoutError(pgid)
 		case <-time.After(handler.termtimeout):
-			log.Printf("%s: message=%s: command-pgid=%d: command didn't terminate in %v; will SIGKILL process group",
+			handler.logger.Printf("%s: message=%s: command-pgid=%d: command didn't terminate in %v; will SIGKILL process group",
 				handler.id, msg.ID, pgid, handler.termtimeout)
 			syscall.Kill(-pgid, syscall.SIGKILL)
 			return cmdTermTimeoutError(pgid)

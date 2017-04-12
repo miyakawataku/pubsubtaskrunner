@@ -50,7 +50,7 @@ func TestIntegration(t *testing.T) {
 		commandtimeout: time.Second,
 		termtimeout:    time.Second,
 	}
-	doMain(conf, func() { time.Sleep(time.Second * 20) })
+	doMain(conf, func() { time.Sleep(time.Second * 20) }, makeTestLogger(t))
 
 	file1, _ := ioutil.ReadFile(tempDir + "/task0.log")
 	file2, _ := ioutil.ReadFile(tempDir + "/task1.log")

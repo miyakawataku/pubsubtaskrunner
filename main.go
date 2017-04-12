@@ -32,7 +32,7 @@ func awaitSignal() {
 }
 
 // doMain does main job after reading configuration.
-func doMain(conf conf, awaitSignal func()) {
+func doMain(conf conf, awaitSignal func(), logger *log.Logger) {
 	appCtx, cancelApp := context.WithCancel(context.Background())
 	defer cancelApp()
 
@@ -42,13 +42,14 @@ func doMain(conf conf, awaitSignal func()) {
 	// start puller
 	psClient, err := newPsClient(appCtx, conf)
 	if err != nil {
-		log.Fatalf("could not make Pub/Sub client: %v", err)
+		logger.Fatalf("could not make Pub/Sub client: %v", err)
 	}
 	puller := makePuller(taskPullerConf{
 		subs:         psClient.Subscription(conf.subscription),
 		maxExtension: conf.commandtimeout * time.Second * 5,
 		respCh:       respCh,
 		reqCh:        reqCh,
+		logger:       logger,
 	})
 	go puller.pullTillShutdown(appCtx)
 
@@ -68,21 +69,23 @@ func doMain(conf conf, awaitSignal func()) {
 			wg:             wg,
 			tasklogpath:    fmt.Sprintf("%s/task%d.log", conf.tasklogdir, i),
 			maxtasklogkb:   conf.maxtasklogkb,
+			logger:         logger,
 		})
 		go handler.handleTillShutdown(appCtx)
 	}
 
 	awaitSignal()
 
-	log.Print("start graceful shutdown")
+	logger.Print("start graceful shutdown")
 	cancelApp()
 	wg.Wait()
-	log.Print("shutdown succeeded")
+	logger.Print("shutdown succeeded")
 }
 
 func main() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	log.SetPrefix(fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid()))
+	logPrefix := fmt.Sprintf("pubsubtaskrunner: pid=%d: ", os.Getpid())
+	logFlag := log.Ldate | log.Ltime | log.Lmicroseconds | log.Lshortfile
+	logger := log.New(os.Stderr, logPrefix, logFlag)
 	conf := readConf()
-	doMain(conf, awaitSignal)
+	doMain(conf, awaitSignal, logger)
 }

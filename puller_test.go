@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"log"
 	"testing"
 
 	"cloud.google.com/go/pubsub"
@@ -11,7 +12,7 @@ import (
 // test puller.pullTillShutdown
 
 func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFunc {
-	return func(context.Context, subs, []pubsub.PullOption) msgIter {
+	return func(context.Context, subs, []pubsub.PullOption, *log.Logger) msgIter {
 		index := *callCount
 		*callCount++
 		if *callCount > len(actions) {
@@ -24,7 +25,7 @@ func makeFakeInitMsgIter(callCount *int, actions []func() msgIter) initMsgIterFu
 }
 
 func makeFakeFetchMsg(callCount *int, actions []func() *pubsub.Message) fetchMsgFunc {
-	return func(ctx context.Context, it msgIter) *pubsub.Message {
+	return func(ctx context.Context, it msgIter, logger *log.Logger) *pubsub.Message {
 		index := *callCount
 		*callCount++
 		if *callCount > len(actions) {
@@ -44,8 +45,9 @@ func TestPullTillShutdownBreakWhileWaitingRequest(t *testing.T) {
 	defer cancel()
 	puller := &taskPuller{
 		taskPullerConf: taskPullerConf{
-			subs:  new(pubsub.Subscription),
-			reqCh: reqCh,
+			subs:   new(pubsub.Subscription),
+			reqCh:  reqCh,
+			logger: makeTestLogger(t),
 		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { return it },
@@ -78,6 +80,7 @@ func TestPullTillShutdownBreakWhileWaitingMessage(t *testing.T) {
 			subs:   new(pubsub.Subscription),
 			respCh: respCh,
 			reqCh:  reqCh,
+			logger: makeTestLogger(t),
 		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { return it },
@@ -121,7 +124,8 @@ func TestPullTillShutdownBreakBeforeInitialized(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	puller := &taskPuller{
 		taskPullerConf: taskPullerConf{
-			subs: new(pubsub.Subscription),
+			subs:   new(pubsub.Subscription),
+			logger: makeTestLogger(t),
 		},
 		initMsgIter: makeFakeInitMsgIter(&initCallCount, []func() msgIter{
 			func() msgIter { cancel(); return nil },
@@ -168,7 +172,7 @@ func TestInitMsgIter(t *testing.T) {
 	opts := []pubsub.PullOption{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	resIt := initMsgIter(ctx, subs, opts)
+	resIt := initMsgIter(ctx, subs, opts, makeTestLogger(t))
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -189,7 +193,7 @@ func TestInitMsgIterRetry(t *testing.T) {
 	opts := []pubsub.PullOption{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	resIt := initMsgIter(ctx, subs, opts)
+	resIt := initMsgIter(ctx, subs, opts, makeTestLogger(t))
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -211,7 +215,7 @@ func TestInitMsgIterShutdownOnCancel(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	resIt := initMsgIter(ctx, subs, opts)
+	resIt := initMsgIter(ctx, subs, opts, makeTestLogger(t))
 	if resIt != nil {
 		t.Errorf("initMsgIter it: got %v, want: nil", resIt)
 	}
@@ -233,7 +237,7 @@ func TestInitMsgIterReturnIterIfNoErrorEvenAfterCancel(t *testing.T) {
 		},
 	}
 	opts := []pubsub.PullOption{}
-	resIt := initMsgIter(ctx, subs, opts)
+	resIt := initMsgIter(ctx, subs, opts, makeTestLogger(t))
 	if resIt != it {
 		t.Errorf("initMsgIter it: got: %v, want: %v", resIt, it)
 	}
@@ -275,7 +279,7 @@ func TestFetchMsg(t *testing.T) {
 			func() (*pubsub.Message, error) { return msg, nil },
 		},
 	}
-	resMsg := fetchMsg(ctx, it)
+	resMsg := fetchMsg(ctx, it, makeTestLogger(t))
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}
@@ -295,7 +299,7 @@ func TestFetchMsgRetry(t *testing.T) {
 			func() (*pubsub.Message, error) { return msg, nil },
 		},
 	}
-	resMsg := fetchMsg(ctx, it)
+	resMsg := fetchMsg(ctx, it, makeTestLogger(t))
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}
@@ -316,7 +320,7 @@ func TestFetchMsgShutdownOnCancel(t *testing.T) {
 			},
 		},
 	}
-	resMsg := fetchMsg(ctx, it)
+	resMsg := fetchMsg(ctx, it, makeTestLogger(t))
 	if resMsg != nil {
 		t.Errorf("fetchMsg msg: got: %v, want: nil", resMsg)
 	}
@@ -337,7 +341,7 @@ func TestFetchMsgReturnMsgIfNoErrorEvenAfterCancel(t *testing.T) {
 			},
 		},
 	}
-	resMsg := fetchMsg(ctx, it)
+	resMsg := fetchMsg(ctx, it, makeTestLogger(t))
 	if resMsg != msg {
 		t.Errorf("fetchMsg msg: got: %v, want: %v", resMsg, msg)
 	}

@@ -56,6 +56,7 @@ func TestHandleTillShutdown(t *testing.T) {
 			reqCh:  reqCh,
 			respCh: respCh,
 			wg:     wg,
+			logger: makeTestLogger(t),
 		},
 		handleSingleTask: makeHandleSingleTaskFunc(&callCount, []handleSingleTaskFunc{
 			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not1 },
@@ -88,6 +89,7 @@ func TestHandleSingleTaskAckForExceedRetryDeadline(t *testing.T) {
 		taskHandlerConf: taskHandlerConf{
 			id:      "handler#001",
 			taskttl: time.Minute * 10,
+			logger:  makeTestLogger(t),
 		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute*10 + time.Second)
@@ -109,6 +111,7 @@ func TestHandleSingleTaskNackForLogRotationFailure(t *testing.T) {
 		taskHandlerConf: taskHandlerConf{
 			id:      "handler#001",
 			taskttl: time.Minute * 10,
+			logger:  makeTestLogger(t),
 		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
@@ -133,6 +136,7 @@ func TestHandleSingleTaskNackForLogOpeningFailure(t *testing.T) {
 		taskHandlerConf: taskHandlerConf{
 			id:      "handler#001",
 			taskttl: time.Minute * 10,
+			logger:  makeTestLogger(t),
 		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
@@ -174,6 +178,7 @@ func TestHandleSingleTaskAckForCommandSuccess(t *testing.T) {
 		taskHandlerConf: taskHandlerConf{
 			id:      "handler#001",
 			taskttl: time.Minute * 10,
+			logger:  makeTestLogger(t),
 		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
@@ -205,6 +210,7 @@ func TestHandleSingleTaskAckForCommandFailure(t *testing.T) {
 		taskHandlerConf: taskHandlerConf{
 			id:      "handler#001",
 			taskttl: time.Minute * 10,
+			logger:  makeTestLogger(t),
 		},
 		now: func() time.Time {
 			return pubTime.Add(time.Minute * 10)
@@ -244,6 +250,7 @@ func TestRotateTaskLogRotateLog(t *testing.T) {
 			id:           "handler#001",
 			tasklogpath:  tasklogpath,
 			maxtasklogkb: 2,
+			logger:       makeTestLogger(t),
 		},
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -286,6 +293,7 @@ func TestRotateTaskLogDoNotRotateLogDueToSize(t *testing.T) {
 			id:           "handler#001",
 			tasklogpath:  tasklogpath,
 			maxtasklogkb: 2,
+			logger:       makeTestLogger(t),
 		},
 	}
 
@@ -327,6 +335,7 @@ func TestRotateTaskLogDoNotRotateNonExistingLog(t *testing.T) {
 			id:           "handler#001",
 			tasklogpath:  tasklogpath,
 			maxtasklogkb: 2,
+			logger:       makeTestLogger(t),
 		},
 	}
 
@@ -360,6 +369,7 @@ func TestRotateTaskLogDoNotRotateUnstattableLog(t *testing.T) {
 			id:           "handler#001",
 			tasklogpath:  tasklogpath,
 			maxtasklogkb: 2,
+			logger:       makeTestLogger(t),
 		},
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -391,6 +401,7 @@ func TestRotateTaskLogDoNotRotateUnmovableLog(t *testing.T) {
 			id:           "handler#001",
 			tasklogpath:  tasklogpath,
 			maxtasklogkb: 2,
+			logger:       makeTestLogger(t),
 		},
 	}
 	isRotated, err := rotateTaskLog(handler)
@@ -426,6 +437,7 @@ func TestRunCmd(t *testing.T) {
 			args:           []string{"-"},
 			commandtimeout: time.Second * 10,
 			termtimeout:    time.Second,
+			logger:         makeTestLogger(t),
 		},
 	}
 	msg := &pubsub.Message{
@@ -450,6 +462,7 @@ func TestRunCmdTimeout(t *testing.T) {
 			args:           []string{"5"},
 			commandtimeout: time.Second,
 			termtimeout:    time.Second,
+			logger:         makeTestLogger(t),
 		},
 	}
 	msg := &pubsub.Message{
@@ -471,6 +484,7 @@ func TestRunCmdTermTimeout(t *testing.T) {
 			args:           []string{"-c", "trap '/bin/true' 15; while /bin/true; do /bin/sleep 100; done"},
 			commandtimeout: time.Second,
 			termtimeout:    time.Second,
+			logger:         makeTestLogger(t),
 		},
 	}
 	msg := &pubsub.Message{
@@ -492,6 +506,7 @@ func TestRunCmdLaunchError(t *testing.T) {
 			args:           []string{},
 			commandtimeout: time.Second,
 			termtimeout:    time.Second,
+			logger:         makeTestLogger(t),
 		},
 	}
 	msg := &pubsub.Message{
