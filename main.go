@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -52,10 +53,9 @@ func doMain(conf conf, awaitSignal func()) {
 	go puller.pullTillShutdown(appCtx)
 
 	// start handlers
-	doneChs := []<-chan struct{}{}
+	wg := &sync.WaitGroup{}
+	wg.Add(conf.parallelism)
 	for i := 0; i < conf.parallelism; i++ {
-		doneCh := make(chan struct{}, 1)
-		doneChs = append(doneChs, doneCh)
 		handler := makeHandler(taskHandlerConf{
 			id:             fmt.Sprintf("handler#%d", i),
 			command:        conf.command,
@@ -65,7 +65,7 @@ func doMain(conf conf, awaitSignal func()) {
 			taskttl:        conf.taskttl,
 			respCh:         respCh,
 			reqCh:          reqCh,
-			doneCh:         doneCh,
+			wg:             wg,
 			tasklogpath:    fmt.Sprintf("%s/task%d.log", conf.tasklogdir, i),
 			maxtasklogkb:   conf.maxtasklogkb,
 		})
@@ -76,9 +76,7 @@ func doMain(conf conf, awaitSignal func()) {
 
 	log.Print("start graceful shutdown")
 	cancelApp()
-	for _, doneCh := range doneChs {
-		<-doneCh
-	}
+	wg.Wait()
 	log.Print("shutdown succeeded")
 }
 

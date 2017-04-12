@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,7 +42,8 @@ func (notifier *fakeMsgNotifier) notify(handler *taskHandler, msg *pubsub.Messag
 func TestHandleTillShutdown(t *testing.T) {
 	reqCh := make(chan struct{}, 4)
 	respCh := make(chan *pubsub.Message, 3)
-	doneCh := make(chan struct{}, 1)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	callCount := 0
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,7 +55,7 @@ func TestHandleTillShutdown(t *testing.T) {
 			id:     "handler#001",
 			reqCh:  reqCh,
 			respCh: respCh,
-			doneCh: doneCh,
+			wg:     wg,
 		},
 		handleSingleTask: makeHandleSingleTaskFunc(&callCount, []handleSingleTaskFunc{
 			func(handler *taskHandler, msg *pubsub.Message) msgNotifier { return not1 },
@@ -65,7 +67,7 @@ func TestHandleTillShutdown(t *testing.T) {
 	respCh <- nil
 	respCh <- nil
 	go handler.handleTillShutdown(ctx)
-	<-doneCh
+	wg.Wait()
 	if callCount != 3 {
 		t.Errorf("handleSingleTask must be called 3 times, but called %d times", callCount)
 	}

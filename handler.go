@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -47,8 +48,8 @@ type taskHandlerConf struct {
 	// respCh is the channel of messages from the puller.
 	respCh <-chan *pubsub.Message
 
-	// doneCh is the channel to notify that the handler is shut down gracefully.
-	doneCh chan<- struct{}
+	// wg is a WaitGroup to notify the termination of the handler.
+	wg *sync.WaitGroup
 
 	// tasklogpath is the path of the task log file of the handler.
 	tasklogpath string
@@ -94,7 +95,7 @@ func (handler *taskHandler) handleTillShutdown(ctx context.Context) {
 			notifier.notify(handler, msg)
 		case <-ctx.Done():
 			log.Printf("%s: shutdown", handler.id)
-			handler.doneCh <- struct{}{}
+			handler.wg.Done()
 			return
 		}
 	}
